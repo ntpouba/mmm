@@ -1,0 +1,13 @@
+[project]
+name = "mmm"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "av>=18.1.0",
+    "matplotlib>=3.11.0",
+    "nibabel>=5.4.2",
+    "nilearn>=0.14.0",
+    "scipy>=1.18.0",
+]

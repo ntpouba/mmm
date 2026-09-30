@@ -1,15 +1,3 @@
-"""
-Single source of truth for the confound-regression variants, shared by the
-surface (regress_out_confounds.py) and volume (volume/*) pipelines and by every
-downstream script that loops over variants.
-
-Every variant is the same base model -- 6 rigid-body motion parameters plus
-linear and quadratic drift -- with extra fMRIPrep confound columns on top, so a
-variant is defined just by what it adds. Adding or dropping a variant here
-changes both the regression and every downstream VARIANT_TAGS loop at once.
-
-Scripts under volume/ put the project root on sys.path before importing this.
-"""
 import numpy as np
 
 MOTION_COLS = [
@@ -38,8 +26,6 @@ VARIANT_TAGS = list(CONFOUND_VARIANTS)
 
 
 def build_covariates(confounds, spec):
-    """confounds: fMRIPrep confounds DataFrame; spec: a CONFOUND_VARIANTS entry.
-    Returns the (T, n_covariates) design, NaNs (first-row derivatives etc.) -> 0."""
     covariates = confounds[spec["cols"]].copy().fillna(0)
 
     if "linear" in spec["drift"]:

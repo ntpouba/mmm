@@ -2,30 +2,28 @@
 Hippocampal FC profile across confound-regression variants, self-contained.
 
 Question: how much does the choice of cleaning regime reshape hippocampal
-connectivity? For each variant we build the hippocampus's FC profile -- each
-hippocampal ROI's timecourse correlated against all 400 Schaefer cortical
+connectivity? For each variant we build the hippocampus's FC profile -- the
+whole-hippocampus timecourse correlated against all 400 Schaefer cortical
 parcels -- then correlate those profiles pairwise across variants, giving a
-variant x variant matrix per hippocampal ROI.
+variant x variant matrix per subject.
 
-Deliberately NOT smoothed, and deliberately independent of the mask_and_smooth
--> regress_out_confounds_volume -> extract_parcel_timecourses_volume chain:
+Works directly on fMRIPrep's MNI-space preproc BOLD, and is deliberately NOT
+smoothed:
 
   - The hippocampus is ~1cm across and borders the ventricles and white
     matter, so a 4mm kernel would pull CSF/WM signal straight into it.
-    Averaging 86-341 voxels per ROI is already substantial spatial averaging;
-    pre-smoothing mostly buys leakage across ROI boundaries. The reference
-    code this is modeled on (mentor's `_load_bold_data`) likewise defaults to
-    `smooth=None`.
+    Averaging its ~1,400 voxels into one timecourse is already substantial
+    spatial averaging; pre-smoothing mostly buys leakage across its boundary.
+    The reference code this is modeled on (mentor's `_load_bold_data`)
+    likewise defaults to `smooth=None`.
   - With no smoothing, no voxel is influenced by its neighbors, so there is
-    nothing for skull/scalp signal to leak into -- the separate skull-strip
-    step is unnecessary here. Atlas voxels are still intersected with each
-    subject's brain mask so that atlas voxels falling outside that subject's
-    brain are dropped.
+    nothing for skull/scalp signal to leak into and no skull-strip step is
+    needed. Atlas voxels are still intersected with each subject's brain mask
+    so that atlas voxels falling outside that subject's brain are dropped.
   - Nothing needs the full 3D grid, so voxels are pulled out once per run and
     everything downstream runs on small 2D arrays.
 
 """
-import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -35,9 +33,9 @@ import pandas as pd
 from nilearn.image import resample_to_img
 from nilearn.signal import clean
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-from confounds import CONFOUND_VARIANTS, VARIANT_TAGS, build_covariates  # noqa: E402
+from confounds import CONFOUND_VARIANTS, VARIANT_TAGS, build_covariates
+
+ROOT = Path(__file__).resolve().parent
 
 SUBJECTS = ["sub-03", "sub-04", "sub-05"]
 SESSION = "ses-19"
@@ -62,7 +60,7 @@ NETWORK_ORDER = ["Vis", "SomMot", "DorsAttn", "SalVentAttn", "Limbic", "Cont", "
 TIAN_PATH = ROOT / "standard/Tian_Subcortex_S2_3T_2009cAsym.nii.gz"
 TIAN_LABELS_PATH = ROOT / "standard/Tian_Subcortex_S2_3T_label.txt"
 
-# Hippocampal ROIs are picked out by name rather than by hardcoded index, so
+# Hippocampal subregions are picked out by name rather than by hardcoded index, so
 # this stays correct regardless of the atlas scale's numbering.
 HIPPOCAMPUS_PATTERN = "HIP"
 
@@ -197,11 +195,9 @@ def network_block_centers(sorted_labels):
 
 
 def compute_profiles():
-    """Returns (profiles, roi_names).
-
-    profiles[(subject, run, variant)] = (1, NPARCEL) array holding the whole
-    hippocampus's correlation against every cortical parcel. All hippocampal
-    voxels are pooled into one timecourse before correlating.
+    """Returns profiles[(subject, run, variant)] = (NPARCEL,) array holding the
+    whole hippocampus's correlation against every cortical parcel. All
+    hippocampal voxels are pooled into one timecourse before correlating.
     """
     schaefer_img = nb.load(SCHAEFER_PATH)
     schaefer = np.round(schaefer_img.get_fdata()).astype(int)
@@ -213,7 +209,6 @@ def compute_profiles():
         raise ValueError("Schaefer atlas grid does not match the BOLD grid")
 
     tian, hipp_names, hipp_values = load_hippocampus_atlas(reference_img)
-    roi_names = [HIPPOCAMPUS_ROI_NAME]
     print(
         f"Pooling voxels from {len(hipp_names)} hippocampal subregions "
         f"into one timecourse: {hipp_names}"
@@ -267,19 +262,14 @@ def compute_profiles():
 
                 # z-score per voxel (done by clean) then pool into ROIs
                 cortex_ts = roi_means(cleaned, cortex_labels, range(1, NPARCEL + 1))
-                hipp_ts = cleaned[hipp_labels > 0].mean(axis=0, keepdims=True)  # (1, T)
+                hipp_ts = cleaned[hipp_labels > 0].mean(axis=0)  # (T,)
 
                 # whole hippocampus vs every cortical parcel
-                profile = np.vstack(
-                    [
-                        [correlate_profiles(h, c) for c in cortex_ts]
-                        for h in hipp_ts
-                    ]
-                )
+                profile = np.array([correlate_profiles(hipp_ts, c) for c in cortex_ts])
                 profiles[(subject, run, variant_tag)] = profile
                 print(f"  [{variant_tag}] profile shape={profile.shape}")
 
-    return profiles, roi_names
+    return profiles
 
 
 def variant_similarity(stack):
@@ -321,13 +311,13 @@ def plot_variant_matrix(matrix, title, out_path, vmin):
     plt.close(fig)
 
 
-def profile_stack(profiles, roi_idx, pairs):
-    """(n_variants, NPARCEL) FC profile for one hippocampal ROI, rows in
-    VARIANT_TAGS order, Fisher-z averaged over the given (subject, run) pairs.
-    A single pair returns that run's own profile."""
+def profile_stack(profiles, pairs):
+    """(n_variants, NPARCEL) hippocampal FC profile, rows in VARIANT_TAGS
+    order, Fisher-z averaged over the given (subject, run) pairs. A single
+    pair returns that run's own profile."""
     return np.vstack(
         [
-            fisher_mean_stack([profiles[(s, r, v)][roi_idx] for s, r in pairs])
+            fisher_mean_stack([profiles[(s, r, v)] for s, r in pairs])
             for v in VARIANT_TAGS
         ]
     )
@@ -361,16 +351,11 @@ def plot_profile_heatmap(stack, labels, title, out_path, vlim, cbar_label):
     plt.close(fig)
 
 
-def safe_filename(name):
-    return name.replace("/", "_").replace(" ", "_")
-
-
 def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    profiles, roi_names = compute_profiles()
-    roi_name = roi_names[0]
-    safe = safe_filename(roi_name)
+    profiles = compute_profiles()
+    roi_name = HIPPOCAMPUS_ROI_NAME
 
     np.save(
         OUT_DIR / "profiles.npy",
@@ -383,7 +368,7 @@ def main():
     # Runs are collapsed within subject: one profile per subject, built by
     # Fisher-z averaging that subject's two runs parcel by parcel.
     subject_stacks = {
-        s: profile_stack(profiles, 0, [(s, r) for r in RUNS]) for s in SUBJECTS
+        s: profile_stack(profiles, [(s, r) for r in RUNS]) for s in SUBJECTS
     }
     subject_matrices = {s: variant_similarity(st) for s, st in subject_stacks.items()}
 
@@ -403,17 +388,17 @@ def main():
         heat_dir.mkdir(parents=True, exist_ok=True)
 
         matrix = subject_matrices[subject]
-        np.save(sim_dir / f"{safe}_variant_similarity.npy", matrix)
+        np.save(sim_dir / f"{roi_name}_variant_similarity.npy", matrix)
         plot_variant_matrix(
             matrix,
             f"{roi_name}: FC-profile similarity across cleaning regimes -- {subject}",
-            sim_dir / f"{safe}_variant_similarity.png",
+            sim_dir / f"{roi_name}_variant_similarity.png",
             vmin_subject,
         )
         plot_profile_heatmap(
             subject_stacks[subject], net_labels,
             f"{roi_name}: FC profile by cleaning regime -- {subject} (runs averaged)",
-            heat_dir / f"{safe}_profile_bynetwork.png",
+            heat_dir / f"{roi_name}_profile_bynetwork.png",
             vlim_subject, "Correlation with hippocampus (r)",
         )
 

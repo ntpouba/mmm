@@ -46,18 +46,11 @@ old_desc = "sm4"
 # Confound-regression variants to compare.
 MOTION_COLS = [
     "trans_x",
-    "trans_x_derivative1",
     "trans_y",
-    "trans_y_derivative1",
     "trans_z",
-    "trans_z_derivative1",
     "rot_x",
-    "rot_x_derivative1",
     "rot_y",
-    "rot_y_derivative1",
     "rot_z",
-    "rot_z_derivative1",
-    "framewise_displacement"
 ]
 
 CONFOUND_VARIANTS = {
@@ -70,16 +63,8 @@ CONFOUND_VARIANTS = {
         "drift": ["linear", "quadratic"],
     },
     "baseacc6": {
-        "cols": MOTION_COLS + [f"a_comp_cor_0{i}" for i in range(6)],
+        "cols": MOTION_COLS + [f"a_comp_cor_{i:02d}" for i in range(6)],
         "drift": ["linear", "quadratic"],
-    },
-    "baseacc20": {
-            "cols": MOTION_COLS + [f"a_comp_cor_{i:02d}" for i in range(20)],
-            "drift": ["linear", "quadratic"],
-    },
-    "gsr": {
-        "cols": ["global_signal"],
-        "drift": [],
     },
 }
 

@@ -25,9 +25,10 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
+from confounds import VARIANT_TAGS
+
 SUBJECTS = ["sub-03", "sub-04", "sub-05"]
 SESSION = "ses-19"
-VARIANT_TAGS = ["base", "basecsfwm", "baseacc6", "baseacc20", "gsr"]
 
 NPARCEL = 400
 LH_RH_BOUNDARY = 199.5

@@ -56,12 +56,10 @@ from pathlib import Path
 from lag_corr import lag_cor, plot_lag_result
 from audio_envelope import ENVELOPE_KINDS, get_audio_envelopes, stimulus_status
 
+from confounds import VARIANT_TAGS
+
 RUNS = ['run-01', 'run-02']  # searched per subject; whichever run holds the clip is used
 SUBJECTS = ['sub-03', 'sub-04', 'sub-05']
-
-# Confound-regression variants to compare (must match parcellated files
-# produced by extract_parcel_timecourses.py / regress_out_confounds.py).
-VARIANT_TAGS = ["base", "basecsfwm", "baseacc6", "baseacc20", "gsr"]
 
 MAX_LAG = 20     # TRs (+-30s)
 

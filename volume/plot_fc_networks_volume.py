@@ -4,17 +4,20 @@ Schaefer-400 FC matrices by network membership. Reuses the exact same
 network-grouping logic (same atlas order file, same LH-1-200/RH-201-400
 convention -- verified to match the volume atlas's own label ordering).
 """
+import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from confounds import VARIANT_TAGS  # noqa: E402
+
 SUBJECTS = ["sub-03", "sub-04", "sub-05"]
 RUNS = ["run-01", "run-02"]
-VARIANT_TAGS = ["base", "basecsfwm", "baseacc6", "baseacc20", "gsr"]
 
 NPARCEL = 400
-ROOT = Path(__file__).resolve().parent.parent
 FC_DIR = ROOT / "scratch/fc_matrices_volume"
 OUT_DIR = ROOT / "scratch/fc_matrices_bynetwork_volume"
 ORDER_TXT = ROOT / "standard/Schaefer2018_400Parcels_17Networks_order.txt"

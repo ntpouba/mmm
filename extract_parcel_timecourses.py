@@ -8,6 +8,8 @@ from pathlib import Path
 import numpy as np
 import nibabel.freesurfer as fs
 
+from confounds import VARIANT_TAGS
+
 # ------------------------------------------------------------------
 # Paths
 # ------------------------------------------------------------------
@@ -16,10 +18,6 @@ STANDARD_DIR = Path("standard")
 
 # subjects to skip (BIDS sub- labels, no zero-padding assumptions)
 EXCLUDE_SUBS = {"003", "004", "005"}
-
-# confound-regression variants to parcellate; must match the desc tags
-# produced by regress_out_confounds.py's CONFOUND_VARIANTS
-VARIANT_TAGS = ["base", "basecsfwm", "baseacc6", "baseacc20", "gsr"]
 
 # ------------------------------------------------------------------
 # Parcel / atlas info

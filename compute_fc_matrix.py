@@ -8,13 +8,11 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
+from confounds import VARIANT_TAGS
+
 SUBJECTS = ["sub-03", "sub-04", "sub-05"]
 SESSION = "ses-19"
 RUNS = ["run-01", "run-02"]
-
-# Confound-regression variants to compare; must match parcellated files
-# produced by extract_parcel_timecourses.py.
-VARIANT_TAGS = ["base", "basecsfwm", "baseacc6", "baseacc20", "gsr"]
 
 NPARCEL = 400
 LH_RH_BOUNDARY = 199.5  # rows/cols 0-199 = LH, 200-399 = RH

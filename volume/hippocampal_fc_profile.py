@@ -25,6 +25,7 @@ Deliberately NOT smoothed, and deliberately independent of the mask_and_smooth
     everything downstream runs on small 2D arrays.
 
 """
+import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -35,6 +36,8 @@ from nilearn.image import resample_to_img
 from nilearn.signal import clean
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from confounds import CONFOUND_VARIANTS, VARIANT_TAGS, build_covariates  # noqa: E402
 
 SUBJECTS = ["sub-03", "sub-04", "sub-05"]
 SESSION = "ses-19"
@@ -77,58 +80,6 @@ OUT_DIR = ROOT / "scratch/hippocampal_fc"
 # SIMILARITY_DIR, profile heatmaps under HEATMAP_DIR, each nesting by subject.
 SIMILARITY_DIR = OUT_DIR / "similarity"
 HEATMAP_DIR = OUT_DIR / "heatmaps"
-
-MOTION_COLS = [
-    "trans_x",
-    "trans_x_derivative1",
-    "trans_y",
-    "trans_y_derivative1",
-    "trans_z",
-    "trans_z_derivative1",
-    "rot_x",
-    "rot_x_derivative1",
-    "rot_y",
-    "rot_y_derivative1",
-    "rot_z",
-    "rot_z_derivative1",
-    "framewise_displacement",
-]
-
-CONFOUND_VARIANTS = {
-    "base": {
-        "cols": MOTION_COLS,
-        "drift": ["linear", "quadratic"],
-    },
-    "basecsfwm": {
-        "cols": MOTION_COLS + ["csf", "white_matter"],
-        "drift": ["linear", "quadratic"],
-    },
-    "baseacc6": {
-        "cols": MOTION_COLS + [f"a_comp_cor_{i:02d}" for i in range(6)],
-        "drift": ["linear", "quadratic"],
-    },
-    "baseacc20": {
-        "cols": MOTION_COLS + [f"a_comp_cor_{i:02d}" for i in range(20)],
-        "drift": ["linear", "quadratic"],
-    },
-    "gsr": {
-        "cols": ["global_signal"],
-        "drift": [],
-    },
-}
-VARIANT_TAGS = list(CONFOUND_VARIANTS)
-
-
-def build_covariates(confounds, spec):
-    covariates = confounds[spec["cols"]].copy().fillna(0)
-
-    if "linear" in spec["drift"]:
-        covariates["linear"] = np.linspace(0, 1, len(covariates))
-    if "quadratic" in spec["drift"]:
-        covariates["quadratic"] = covariates["linear"] ** 2
-
-    return covariates
-
 
 def bold_path(subject, run):
     return (

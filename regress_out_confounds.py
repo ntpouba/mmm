@@ -11,6 +11,8 @@ import scipy as sp
 import scipy.io
 from sklearn.linear_model import LinearRegression
 
+from confounds import CONFOUND_VARIANTS, build_covariates
+
 
 # -----------------------------
 # Paths
@@ -42,42 +44,6 @@ runs = ["run-01", "run-02"]
 hemis = ["L", "R"]
 
 old_desc = "sm4"
-
-# Confound-regression variants to compare.
-MOTION_COLS = [
-    "trans_x",
-    "trans_y",
-    "trans_z",
-    "rot_x",
-    "rot_y",
-    "rot_z",
-]
-
-CONFOUND_VARIANTS = {
-    "base": {
-        "cols": MOTION_COLS,
-        "drift": ["linear", "quadratic"],
-    },
-    "basecsfwm": {
-        "cols": MOTION_COLS + ["csf", "white_matter"],
-        "drift": ["linear", "quadratic"],
-    },
-    "baseacc6": {
-        "cols": MOTION_COLS + [f"a_comp_cor_{i:02d}" for i in range(6)],
-        "drift": ["linear", "quadratic"],
-    },
-}
-
-
-def build_covariates(confounds, spec):
-    covariates = confounds[spec["cols"]].copy().fillna(0)
-
-    if "linear" in spec["drift"]:
-        covariates["linear"] = np.linspace(0, 1, len(covariates))
-    if "quadratic" in spec["drift"]:
-        covariates["quadratic"] = covariates["linear"] ** 2
-
-    return covariates
 
 
 # -----------------------------

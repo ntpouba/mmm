@@ -4,20 +4,23 @@ matrices from the volume-pipeline Schaefer-400 parcellated timecourses (see
 extract_parcel_timecourses_volume.py), one 400x400 matrix per subject per
 run per confound-regression variant.
 """
+import sys
 from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
 
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from confounds import VARIANT_TAGS  # noqa: E402
+
 SUBJECTS = ["sub-03", "sub-04", "sub-05"]
 SESSION = "ses-19"
 RUNS = ["run-01", "run-02"]
-VARIANT_TAGS = ["base", "basecsfwm", "baseacc6", "baseacc20", "gsr"]
 
 NPARCEL = 400
 LH_RH_BOUNDARY = 199.5
 
-ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = ROOT / "scratch/fc_matrices_volume"
 
 

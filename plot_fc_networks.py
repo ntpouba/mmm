@@ -19,9 +19,10 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from confounds import VARIANT_TAGS
+
 SUBJECTS = ["sub-03", "sub-04", "sub-05"]
 RUNS = ["run-01", "run-02"]
-VARIANT_TAGS = ["base", "basecsfwm", "baseacc6", "baseacc20", "gsr"]
 
 NPARCEL = 400
 FC_DIR = Path("scratch/fc_matrices")

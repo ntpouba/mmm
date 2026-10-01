@@ -56,6 +56,7 @@ from pathlib import Path
 from lag_corr import lag_cor, plot_lag_result
 from audio_envelope import ENVELOPE_KINDS, get_audio_envelopes, stimulus_status
 
+from atlas import ORDER_TXT
 from confounds import VARIANT_TAGS
 # RUNS are searched per subject; whichever run holds the clip is used
 from layout import RUNS, SUBJECTS, Run, parcels
@@ -71,7 +72,6 @@ PLAUSIBLE_LAG_RANGE = (-5, -2)   # TRs: audio leads BOLD by 3-7.5s
 R_THRESHOLD = 0.1
 
 ORDER_CSV = Path('movie_order.csv')
-ORDER_TXT = Path('standard/Schaefer2018_400Parcels_17Networks_order.txt')
 # Nested <movie>/<subject>/<variant>.png -- movie and subject are the axes you
 # browse by; variant is the leaf file.
 OUT_DIR = Path('scratch/audio_envelope_corr')

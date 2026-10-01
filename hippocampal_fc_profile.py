@@ -33,6 +33,7 @@ import pandas as pd
 from nilearn.image import resample_to_img
 from nilearn.signal import clean
 
+from atlas import NETWORK_ORDER, NPARCEL, load_network_labels, network_block_centers, network_sort_order
 from confounds import CONFOUND_VARIANTS, VARIANT_TAGS, build_covariates
 from layout import SUBJECTS, confounds_tsv, iter_runs, mni_bold, mni_brain_mask
 
@@ -42,16 +43,10 @@ ROOT = Path(__file__).resolve().parent
 RUN_LIST = list(iter_runs(sessions=["ses-19"]))
 TR = 1.5
 
-NPARCEL = 400
-
+# Profile heatmap columns are grouped by network via atlas.py, which reads the
+# surface atlas's order file; this volume atlas's labels 1-400 match that row
+# order (verified against world-space X coordinates).
 SCHAEFER_PATH = ROOT / "standard/Schaefer2018_400Parcels_MNI152NLin2009cAsym_2mm.nii.gz"
-
-# Parcel -> network grouping, used to order the columns of the profile
-# heatmaps. Same atlas order file and same grouping as plot_fc_networks.py;
-# the volume atlas's labels 1-400 match its row order (verified against
-# world-space X coordinates).
-ORDER_TXT = ROOT / "standard/Schaefer2018_400Parcels_17Networks_order.txt"
-NETWORK_ORDER = ["Vis", "SomMot", "DorsAttn", "SalVentAttn", "Limbic", "Cont", "Default", "TempPar"]
 
 # Melbourne Subcortex Atlas (Tian et al. 2020), scale II, in our own space.
 # Both files come as a pair: the label text file has one ROI name per line,
@@ -140,36 +135,6 @@ def fisher_mean_stack(arrays):
     """Elementwise Fisher-z mean over a stack of correlation arrays."""
     stack = np.asarray(arrays, dtype=float)
     return np.tanh(np.nanmean(np.arctanh(np.clip(stack, -0.999999, 0.999999)), axis=0))
-
-
-def load_network_labels():
-    """Length-400 list of network group names, in parcel order."""
-    labels = []
-    for line in ORDER_TXT.read_text().splitlines():
-        _, name = line.split("\t")[:2]
-        match = next((net for net in NETWORK_ORDER if net in name), None)
-        if match is None:
-            raise ValueError(f"Could not map parcel name to a network group: {name!r}")
-        labels.append(match)
-    if len(labels) != NPARCEL:
-        raise ValueError(f"Expected {NPARCEL} parcel labels, got {len(labels)}")
-    return labels
-
-
-def network_sort_order(labels):
-    return sorted(range(len(labels)), key=lambda i: NETWORK_ORDER.index(labels[i]))
-
-
-def network_block_centers(sorted_labels):
-    boundaries, centers = [], []
-    start = 0
-    for i in range(1, len(sorted_labels) + 1):
-        if i == len(sorted_labels) or sorted_labels[i] != sorted_labels[start]:
-            centers.append((start + i - 1) / 2)
-            if i != len(sorted_labels):
-                boundaries.append(i - 0.5)
-            start = i
-    return boundaries, centers
 
 
 def compute_profiles():

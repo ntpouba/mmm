@@ -83,8 +83,8 @@ def parcels(r: Run, variant: str) -> Path:
     return funcdir(r) / "parcellated" / f"{r.prefix}_space-fsaverage6_desc-schaefer400{variant}.npy"
 
 
-def fc_matrix(r: Run, variant: str, suffix: str = ".npy") -> Path:
-    return SCRATCH / "fc_matrices" / f"{r.prefix}_{variant}_fc400{suffix}"
+def fc_matrix(r: Run, variant: str) -> Path:
+    return SCRATCH / "fc_matrices" / f"{r.prefix}_{variant}_fc400.npy"
 
 
 def fc_bynetwork_png(r: Run, variant: str) -> Path:

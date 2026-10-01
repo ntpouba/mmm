@@ -25,11 +25,9 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
+from atlas import NETWORK_ORDER, load_network_labels, network_block_centers, network_sort_order
 from confounds import VARIANT_TAGS
 from layout import Run, parcels
-
-NPARCEL = 400
-LH_RH_BOUNDARY = 199.5
 
 MOVIE_TAG = "negspace"
 
@@ -46,8 +44,6 @@ N_TR = int(np.floor(min(c["duration_tr"] for c in CLIP_LOCATIONS.values())))
 
 OUT_DIR = Path("scratch/isfc_matrices")
 OUT_DIR_NETWORK = Path("scratch/isfc_matrices_bynetwork")
-ORDER_TXT = Path("standard/Schaefer2018_400Parcels_17Networks_order.txt")
-NETWORK_ORDER = ["Vis", "SomMot", "DorsAttn", "SalVentAttn", "Limbic", "Cont", "Default", "TempPar"]
 
 
 def load_movie_segment(subject, variant_tag):
@@ -85,49 +81,6 @@ def loo_isfc(segments, subject):
     others = np.mean([seg for s, seg in segments.items() if s != subject], axis=0)
     m = cross_corr(segments[subject], others)
     return m
-
-
-def load_network_labels(order_txt=ORDER_TXT):
-    labels = []
-    for line in order_txt.read_text().splitlines():
-        _, name = line.split("\t")[:2]
-        match = next((net for net in NETWORK_ORDER if net in name), None)
-        if match is None:
-            raise ValueError(f"Could not map parcel name to a network group: {name!r}")
-        labels.append(match)
-    if len(labels) != NPARCEL:
-        raise ValueError(f"Expected {NPARCEL} parcel labels, got {len(labels)}")
-    return labels
-
-
-def network_sort_order(labels):
-    return sorted(range(len(labels)), key=lambda i: NETWORK_ORDER.index(labels[i]))
-
-
-def network_block_centers(sorted_labels):
-    boundaries, centers = [], []
-    start = 0
-    for i in range(1, len(sorted_labels) + 1):
-        if i == len(sorted_labels) or sorted_labels[i] != sorted_labels[start]:
-            centers.append((start + i - 1) / 2)
-            if i != len(sorted_labels):
-                boundaries.append(i - 0.5)
-            start = i
-    return boundaries, centers
-
-
-def plot_isfc(fc, title, out_path, vlim):
-    fig, ax = plt.subplots(figsize=(7, 6))
-    im = ax.imshow(fc, cmap="RdBu_r", vmin=-vlim, vmax=vlim)
-    ax.set_title(title)
-    ax.set_xlabel("Others' mean parcel (0-199 LH, 200-399 RH)")
-    ax.set_ylabel("Own parcel (0-199 LH, 200-399 RH)")
-    ax.axvline(LH_RH_BOUNDARY, color="k", linewidth=0.5)
-    ax.axhline(LH_RH_BOUNDARY, color="k", linewidth=0.5)
-    fig.colorbar(im, ax=ax, label="Pearson r")
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=150)
-    plt.close(fig)
 
 
 def plot_isfc_by_network(fc, labels, title, out_path, vlim):
@@ -175,9 +128,6 @@ def main():
             out_npy = OUT_DIR / f"{name}_{MOVIE_TAG}_{variant_tag}_isfc400.npy"
             np.save(out_npy, m)
 
-            out_png = OUT_DIR / f"{name}_{MOVIE_TAG}_{variant_tag}_isfc400.png"
-            plot_isfc(m, f"{name} LOO-ISFC ({MOVIE_TAG}, {variant_tag})", out_png, vlim)
-
             net_out_dir = OUT_DIR_NETWORK / name / MOVIE_TAG
             net_out_dir.mkdir(parents=True, exist_ok=True)
             net_out = net_out_dir / f"{variant_tag}_isfc400_bynetwork.png"
@@ -187,7 +137,7 @@ def main():
                 net_out, vlim,
             )
 
-            print(f"  [{name}] saved {out_npy.name}, {out_png.name}, {net_out}")
+            print(f"  [{name}] saved {out_npy.name}, {net_out}")
 
     print("\ndone")
 

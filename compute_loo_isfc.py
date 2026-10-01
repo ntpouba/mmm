@@ -26,9 +26,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from confounds import VARIANT_TAGS
-
-SUBJECTS = ["sub-03", "sub-04", "sub-05"]
-SESSION = "ses-19"
+from layout import Run, parcels
 
 NPARCEL = 400
 LH_RH_BOUNDARY = 199.5
@@ -37,11 +35,13 @@ MOVIE_TAG = "negspace"
 
 # Clip location (run, onset TR, duration TR) per subject for "Negative Space"
 # during ses-19, from movie_order.csv.
+CLIP_SESSION = "ses-19"
 CLIP_LOCATIONS = {
     "sub-03": {"run": "run-02", "onset_tr": 10.3221, "duration_tr": 192.666},
     "sub-04": {"run": "run-01", "onset_tr": 360.9829, "duration_tr": 192.6557},
     "sub-05": {"run": "run-02", "onset_tr": 463.6497, "duration_tr": 192.666},
 }
+SUBJECTS = list(CLIP_LOCATIONS)
 N_TR = int(np.floor(min(c["duration_tr"] for c in CLIP_LOCATIONS.values())))
 
 OUT_DIR = Path("scratch/isfc_matrices")
@@ -50,16 +50,9 @@ ORDER_TXT = Path("standard/Schaefer2018_400Parcels_17Networks_order.txt")
 NETWORK_ORDER = ["Vis", "SomMot", "DorsAttn", "SalVentAttn", "Limbic", "Cont", "Default", "TempPar"]
 
 
-def parcel_file(subject, run, variant_tag):
-    return Path(
-        f"data/{subject}/func/parcellated/"
-        f"{subject}_{SESSION}_task-NATencoding_{run}_space-fsaverage6_desc-schaefer400{variant_tag}.npy"
-    )
-
-
 def load_movie_segment(subject, variant_tag):
     loc = CLIP_LOCATIONS[subject]
-    combined = np.load(parcel_file(subject, loc["run"], variant_tag))  # (NPARCEL, TR_total)
+    combined = np.load(parcels(Run(subject, CLIP_SESSION, loc["run"]), variant_tag))  # (NPARCEL, TR_total)
     start = round(loc["onset_tr"])
     end = start + N_TR
     if end > combined.shape[1]:

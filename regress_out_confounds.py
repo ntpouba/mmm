@@ -1,8 +1,6 @@
 # GPT adpted from Hongmi's script
 
 import argparse
-import itertools
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -12,38 +10,7 @@ import scipy.io
 from sklearn.linear_model import LinearRegression
 
 from confounds import CONFOUND_VARIANTS, build_covariates
-
-
-# -----------------------------
-# Paths
-# -----------------------------
-
-ROOTDIR = Path("/home/darekar1/proj/mmm")
-DATADIR = ROOTDIR / "data"
-
-
-# -----------------------------
-# Parameters
-# -----------------------------
-
-subjects = [
-    "sub-03",
-    "sub-04",
-    "sub-05"
-]
-
-task = "NATencoding"
-
-# Add a session here once its fmriprep giis + confounds tsv are staged into
-# data/<subject>/func/ and freesurfer_surface_smoothing_1.sh has produced its
-# desc-sm4 files. Sessions whose inputs are absent are reported and skipped,
-# so this is safe to run while only part of the data is in place.
-sessions = ["ses-19", "ses-20"]
-runs = ["run-01", "run-02"]
-
-hemis = ["L", "R"]
-
-old_desc = "sm4"
+from layout import HEMIS, confounds_tsv, iter_runs, surf_bold, surf_clean
 
 
 # -----------------------------
@@ -64,138 +31,122 @@ n_written = n_skipped = n_missing = 0
 for variant_tag, variant_spec in CONFOUND_VARIANTS.items():
 
     print(f"\n=== Variant: {variant_tag} ===")
-    new_desc = f"sm4zscored{variant_tag}"
 
-    for subject in subjects:
+    for r in iter_runs():
 
-        funcdir = DATADIR / subject / "func"
-
-        for session, run in itertools.product(sessions, runs):
-
-            print(f"\nProcessing {subject} {session} {run}")
+        print(f"\nProcessing {r}")
 
 
-            # -----------------------------
-            # Load confounds
-            # -----------------------------
+        # -----------------------------
+        # Load confounds
+        # -----------------------------
 
-            confound_file = (
-                funcdir
-                / f"{subject}_{session}_task-{task}_{run}_desc-confounds_timeseries.tsv"
-            )
+        confound_file = confounds_tsv(r)
 
-            if not confound_file.exists():
-                print(f"  [missing] {confound_file.name}, skipping")
+        if not confound_file.exists():
+            print(f"  [missing] {confound_file.name}, skipping")
+            n_missing += 1
+            continue
+
+        confounds = pd.read_csv(
+            confound_file,
+            sep="\t"
+        )
+
+        covariates = build_covariates(confounds, variant_spec)
+
+
+        # -----------------------------
+        # Process hemispheres
+        # -----------------------------
+
+        for hemi in HEMIS:
+
+            print(f"  Hemisphere {hemi}")
+
+
+            infile = surf_bold(r, hemi, "sm4")
+            out_npy = surf_clean(r, hemi, variant_tag, ".npy")
+            out_mat = surf_clean(r, hemi, variant_tag, ".mat")
+
+            if not args.force and out_npy.exists() and out_mat.exists():
+                print(f"    [exists] {out_npy.stem}, skipping")
+                n_skipped += 1
+                continue
+
+            if not infile.exists():
+                print(f"    [missing] {infile.name}, skipping")
                 n_missing += 1
                 continue
 
-            confounds = pd.read_csv(
-                confound_file,
-                sep="\t"
+
+            # Load GIFTI
+            img = nb.load(infile)
+
+            epi = np.array(
+                [darray.data for darray in img.darrays] # type: ignore
             )
 
-            covariates = build_covariates(confounds, variant_spec)
+            # Check TR alignment
+            if epi.shape[0] != len(covariates):
+                raise ValueError(
+                    f"{r} {hemi}: "
+                    f"{epi.shape[0]} TRs in GIFTI but "
+                    f"{len(covariates)} rows in confounds"
+                )
+
+            print(f"    Input shape: {epi.shape}")
 
 
             # -----------------------------
-            # Process hemispheres
+            # Confound regression
             # -----------------------------
 
-            for hemi in hemis:
+            reg = LinearRegression()
 
-                print(f"  Hemisphere {hemi}")
+            reg.fit(
+                covariates,
+                epi
+            )
 
-
-                infile = (
-                    funcdir
-                    / f"{subject}_{session}_task-{task}_{run}_hemi-{hemi}_space-fsaverage6_desc-{old_desc}_bold.func.gii"
-                )
-
-                outfile = (
-                    funcdir
-                    / f"{subject}_{session}_task-{task}_{run}_hemi-{hemi}_space-fsaverage6_desc-{new_desc}_bold"
-                )
-
-                if (not args.force
-                        and outfile.with_suffix(".npy").exists()
-                        and outfile.with_suffix(".mat").exists()):
-                    print(f"    [exists] {outfile.name}, skipping")
-                    n_skipped += 1
-                    continue
-
-                if not infile.exists():
-                    print(f"    [missing] {infile.name}, skipping")
-                    n_missing += 1
-                    continue
+            residual = epi - reg.predict(covariates)
 
 
-                # Load GIFTI
-                img = nb.load(infile)
-
-                epi = np.array(
-                    [darray.data for darray in img.darrays] # type: ignore
-                )
-
-                # Check TR alignment
-                if epi.shape[0] != len(covariates):
-                    raise ValueError(
-                        f"{subject} {run} {hemi}: "
-                        f"{epi.shape[0]} TRs in GIFTI but "
-                        f"{len(covariates)} rows in confounds"
-                    )
-
-                print(f"    Input shape: {epi.shape}")
+            # Convert TR x vertices -> vertices x TR
+            residual = residual.T
 
 
-                # -----------------------------
-                # Confound regression
-                # -----------------------------
+            # -----------------------------
+            # Z-score each vertex over time
+            # -----------------------------
 
-                reg = LinearRegression()
-
-                reg.fit(
-                    covariates,
-                    epi
-                )
-
-                residual = epi - reg.predict(covariates)
+            residual = sp.stats.zscore(
+                residual,
+                axis=1
+            )
 
 
-                # Convert TR x vertices -> vertices x TR
-                residual = residual.T
+            print(f"    Output shape: {residual.shape}")
 
 
-                # -----------------------------
-                # Z-score each vertex over time
-                # -----------------------------
+            # -----------------------------
+            # Save
+            # -----------------------------
 
-                residual = sp.stats.zscore(
-                    residual,
-                    axis=1
-                )
+            np.save(
+                out_npy,
+                residual
+            )
 
+            scipy.io.savemat(
+                out_mat,
+                {
+                    "residual": residual
+                }
+            )
 
-                print(f"    Output shape: {residual.shape}")
-
-
-                # -----------------------------
-                # Save
-                # -----------------------------
-
-                np.save(
-                    outfile.with_suffix(".npy"),
-                    residual
-                )
-
-                scipy.io.savemat(
-                    outfile.with_suffix(".mat"),
-                    {
-                        "residual": residual
-                    }
-                )
-
-                print(f"    Saved {outfile}")
-                n_written += 1
+            print(f"    Saved {out_npy.with_suffix('')}")
+            n_written += 1
 
 
 print(f"\nDone. wrote {n_written}, already present {n_skipped}, "

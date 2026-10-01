@@ -34,17 +34,16 @@ from nilearn.image import resample_to_img
 from nilearn.signal import clean
 
 from confounds import CONFOUND_VARIANTS, VARIANT_TAGS, build_covariates
+from layout import SUBJECTS, confounds_tsv, iter_runs, mni_bold, mni_brain_mask
 
 ROOT = Path(__file__).resolve().parent
 
-SUBJECTS = ["sub-03", "sub-04", "sub-05"]
-SESSION = "ses-19"
-RUNS = ["run-01", "run-02"]
+# MNI-space volumes are only staged for ses-19
+RUN_LIST = list(iter_runs(sessions=["ses-19"]))
 TR = 1.5
 
 NPARCEL = 400
 
-DATADIR = ROOT / "data"
 SCHAEFER_PATH = ROOT / "standard/Schaefer2018_400Parcels_MNI152NLin2009cAsym_2mm.nii.gz"
 
 # Parcel -> network grouping, used to order the columns of the profile
@@ -78,27 +77,6 @@ OUT_DIR = ROOT / "scratch/hippocampal_fc"
 # SIMILARITY_DIR, profile heatmaps under HEATMAP_DIR, each nesting by subject.
 SIMILARITY_DIR = OUT_DIR / "similarity"
 HEATMAP_DIR = OUT_DIR / "heatmaps"
-
-def bold_path(subject, run):
-    return (
-        DATADIR / subject / "func"
-        / f"{subject}_{SESSION}_task-NATencoding_{run}_space-MNI152NLin2009cAsym_res-2_desc-preproc_bold.nii.gz"
-    )
-
-
-def brain_mask_path(subject, run):
-    return (
-        DATADIR / subject / "func"
-        / f"{subject}_{SESSION}_task-NATencoding_{run}_space-MNI152NLin2009cAsym_res-2_desc-brain_mask.nii.gz"
-    )
-
-
-def confound_path(subject, run):
-    return (
-        DATADIR / subject / "func"
-        / f"{subject}_{SESSION}_task-NATencoding_{run}_desc-confounds_timeseries.tsv"
-    )
-
 
 def load_hippocampus_atlas(reference_img):
     """Returns (hippocampus label volume, ordered ROI names, ordered label values).
@@ -195,14 +173,14 @@ def network_block_centers(sorted_labels):
 
 
 def compute_profiles():
-    """Returns profiles[(subject, run, variant)] = (NPARCEL,) array holding the
+    """Returns profiles[(run, variant)] = (NPARCEL,) array holding the
     whole hippocampus's correlation against every cortical parcel. All
     hippocampal voxels are pooled into one timecourse before correlating.
     """
     schaefer_img = nb.load(SCHAEFER_PATH)
     schaefer = np.round(schaefer_img.get_fdata()).astype(int)
 
-    reference_img = nb.load(bold_path(SUBJECTS[0], RUNS[0]))
+    reference_img = nb.load(mni_bold(RUN_LIST[0]))
     if schaefer.shape != reference_img.shape[:3] or not np.allclose(
         schaefer_img.affine, reference_img.affine
     ):
@@ -220,54 +198,53 @@ def compute_profiles():
 
     profiles = {}
 
-    for subject in SUBJECTS:
-        for run in RUNS:
-            print(f"\nProcessing {subject} {run}")
+    for r in RUN_LIST:
+        print(f"\nProcessing {r}")
 
-            bold_img = nb.load(bold_path(subject, run))
-            brain = nb.load(brain_mask_path(subject, run)).get_fdata().astype(bool)
+        bold_img = nb.load(mni_bold(r))
+        brain = nb.load(mni_brain_mask(r)).get_fdata().astype(bool)
 
-            hipp_vol = np.where(np.isin(tian, hipp_values), tian, 0)
-            # hippocampus takes precedence where the two atlases disagree
-            cortex_vol = np.where(hipp_vol > 0, 0, schaefer)
+        hipp_vol = np.where(np.isin(tian, hipp_values), tian, 0)
+        # hippocampus takes precedence where the two atlases disagree
+        cortex_vol = np.where(hipp_vol > 0, 0, schaefer)
 
-            roi_mask = ((cortex_vol > 0) | (hipp_vol > 0)) & brain
+        roi_mask = ((cortex_vol > 0) | (hipp_vol > 0)) & brain
 
-            data = bold_img.get_fdata(dtype=np.float32)
-            voxels = data[roi_mask]  # (n_roi_voxels, T)
-            del data
+        data = bold_img.get_fdata(dtype=np.float32)
+        voxels = data[roi_mask]  # (n_roi_voxels, T)
+        del data
 
-            cortex_labels = cortex_vol[roi_mask]
-            hipp_labels = hipp_vol[roi_mask]
-            print(f"  {voxels.shape[0]} ROI voxels, {voxels.shape[1]} TRs")
+        cortex_labels = cortex_vol[roi_mask]
+        hipp_labels = hipp_vol[roi_mask]
+        print(f"  {voxels.shape[0]} ROI voxels, {voxels.shape[1]} TRs")
 
-            confounds = pd.read_csv(confound_path(subject, run), sep="\t")
-            if voxels.shape[1] != len(confounds):
-                raise ValueError(
-                    f"{subject} {run}: {voxels.shape[1]} TRs in volume but "
-                    f"{len(confounds)} rows in confounds"
-                )
+        confounds = pd.read_csv(confounds_tsv(r), sep="\t")
+        if voxels.shape[1] != len(confounds):
+            raise ValueError(
+                f"{r}: {voxels.shape[1]} TRs in volume but "
+                f"{len(confounds)} rows in confounds"
+            )
 
-            for variant_tag, variant_spec in CONFOUND_VARIANTS.items():
-                covariates = build_covariates(confounds, variant_spec)
+        for variant_tag, variant_spec in CONFOUND_VARIANTS.items():
+            covariates = build_covariates(confounds, variant_spec)
 
-                cleaned = clean(
-                    voxels.T,  # nilearn wants (n_timepoints, n_features)
-                    confounds=covariates.values,
-                    detrend=False,
-                    filter=False,
-                    standardize="zscore_sample",
-                    t_r=TR,
-                ).T
+            cleaned = clean(
+                voxels.T,  # nilearn wants (n_timepoints, n_features)
+                confounds=covariates.values,
+                detrend=False,
+                filter=False,
+                standardize="zscore_sample",
+                t_r=TR,
+            ).T
 
-                # z-score per voxel (done by clean) then pool into ROIs
-                cortex_ts = roi_means(cleaned, cortex_labels, range(1, NPARCEL + 1))
-                hipp_ts = cleaned[hipp_labels > 0].mean(axis=0)  # (T,)
+            # z-score per voxel (done by clean) then pool into ROIs
+            cortex_ts = roi_means(cleaned, cortex_labels, range(1, NPARCEL + 1))
+            hipp_ts = cleaned[hipp_labels > 0].mean(axis=0)  # (T,)
 
-                # whole hippocampus vs every cortical parcel
-                profile = np.array([correlate_profiles(hipp_ts, c) for c in cortex_ts])
-                profiles[(subject, run, variant_tag)] = profile
-                print(f"  [{variant_tag}] profile shape={profile.shape}")
+            # whole hippocampus vs every cortical parcel
+            profile = np.array([correlate_profiles(hipp_ts, c) for c in cortex_ts])
+            profiles[(r, variant_tag)] = profile
+            print(f"  [{variant_tag}] profile shape={profile.shape}")
 
     return profiles
 
@@ -311,13 +288,13 @@ def plot_variant_matrix(matrix, title, out_path, vmin):
     plt.close(fig)
 
 
-def profile_stack(profiles, pairs):
+def profile_stack(profiles, runs):
     """(n_variants, NPARCEL) hippocampal FC profile, rows in VARIANT_TAGS
-    order, Fisher-z averaged over the given (subject, run) pairs. A single
-    pair returns that run's own profile."""
+    order, Fisher-z averaged over the given runs. A single run returns that
+    run's own profile."""
     return np.vstack(
         [
-            fisher_mean_stack([profiles[(s, r, v)] for s, r in pairs])
+            fisher_mean_stack([profiles[(r, v)] for r in runs])
             for v in VARIANT_TAGS
         ]
     )
@@ -359,7 +336,7 @@ def main():
 
     np.save(
         OUT_DIR / "profiles.npy",
-        {str(k): v for k, v in profiles.items()},
+        {f"{r.prefix}_{variant}": v for (r, variant), v in profiles.items()},
         allow_pickle=True,
     )
 
@@ -368,7 +345,7 @@ def main():
     # Runs are collapsed within subject: one profile per subject, built by
     # Fisher-z averaging that subject's two runs parcel by parcel.
     subject_stacks = {
-        s: profile_stack(profiles, [(s, r) for r in RUNS]) for s in SUBJECTS
+        s: profile_stack(profiles, [r for r in RUN_LIST if r.sub == s]) for s in SUBJECTS
     }
     subject_matrices = {s: variant_similarity(st) for s, st in subject_stacks.items()}
 

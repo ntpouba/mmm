@@ -57,9 +57,8 @@ from lag_corr import lag_cor, plot_lag_result
 from audio_envelope import ENVELOPE_KINDS, get_audio_envelopes, stimulus_status
 
 from confounds import VARIANT_TAGS
-
-RUNS = ['run-01', 'run-02']  # searched per subject; whichever run holds the clip is used
-SUBJECTS = ['sub-03', 'sub-04', 'sub-05']
+# RUNS are searched per subject; whichever run holds the clip is used
+from layout import RUNS, SUBJECTS, Run, parcels
 
 MAX_LAG = 20     # TRs (+-30s)
 
@@ -107,9 +106,7 @@ def slugify(name):
 
 
 def parcel_path(subject, session, run, variant_tag):
-    return Path(f'data/{subject}/func/parcellated/'
-                f'{subject}_{session}_task-NATencoding_{run}'
-                f'_space-fsaverage6_desc-schaefer400{variant_tag}.npy')
+    return parcels(Run(subject, session, run), variant_tag)
 
 
 def movie_mask(df, movie_name):

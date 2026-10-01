@@ -1,30 +1,16 @@
 """
 Compute full parcel-by-parcel functional connectivity (FC) matrices from the
 Schaefer-400 parcellated timecourses (see extract_parcel_timecourses.py),
-one 400x400 matrix per subject per confound-regression variant.
+one 400x400 matrix per run per confound-regression variant.
 """
-from pathlib import Path
-
 import numpy as np
 import matplotlib.pyplot as plt
 
 from confounds import VARIANT_TAGS
-
-SUBJECTS = ["sub-03", "sub-04", "sub-05"]
-SESSION = "ses-19"
-RUNS = ["run-01", "run-02"]
+from layout import fc_matrix, iter_runs, parcels
 
 NPARCEL = 400
 LH_RH_BOUNDARY = 199.5  # rows/cols 0-199 = LH, 200-399 = RH
-
-OUT_DIR = Path("scratch/fc_matrices")
-
-
-def parcel_file(subject, run, variant_tag):
-    return Path(
-        f"data/{subject}/func/parcellated/"
-        f"{subject}_{SESSION}_task-NATencoding_{run}_space-fsaverage6_desc-schaefer400{variant_tag}.npy"
-    )
 
 
 def compute_fc(combined):
@@ -47,34 +33,32 @@ def plot_fc(fc, title, out_path):
 
 
 def main():
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    for r in iter_runs():
+        for variant_tag in VARIANT_TAGS:
+            pf = parcels(r, variant_tag)
+            if not pf.exists():
+                print(f"[{r}/{variant_tag}] missing {pf}, skipping")
+                continue
 
-    for subject in SUBJECTS:
-        for run in RUNS:
-            for variant_tag in VARIANT_TAGS:
-                pf = parcel_file(subject, run, variant_tag)
-                if not pf.exists():
-                    print(f"[{subject}/{run}/{variant_tag}] missing {pf}, skipping")
-                    continue
+            combined = np.load(pf)  # (NPARCEL, TR)
+            if combined.shape[0] != NPARCEL:
+                print(f"[{r}/{variant_tag}] unexpected shape {combined.shape}, skipping")
+                continue
 
-                combined = np.load(pf)  # (NPARCEL, TR)
-                if combined.shape[0] != NPARCEL:
-                    print(f"[{subject}/{run}/{variant_tag}] unexpected shape {combined.shape}, skipping")
-                    continue
+            fc = compute_fc(combined)
 
-                fc = compute_fc(combined)
+            out_npy = fc_matrix(r, variant_tag, ".npy")
+            out_npy.parent.mkdir(parents=True, exist_ok=True)
+            np.save(out_npy, fc)
 
-                out_npy = OUT_DIR / f"{subject}_{run}_{variant_tag}_fc400.npy"
-                np.save(out_npy, fc)
+            out_png = fc_matrix(r, variant_tag, ".png")
+            plot_fc(fc, f"{r} FC ({NPARCEL}x{NPARCEL}, {variant_tag})", out_png)
 
-                out_png = OUT_DIR / f"{subject}_{run}_{variant_tag}_fc400.png"
-                plot_fc(fc, f"{subject} {run} FC ({NPARCEL}x{NPARCEL}, {variant_tag})", out_png)
-
-                off_diag = fc[~np.eye(NPARCEL, dtype=bool)]
-                print(
-                    f"[{subject}/{run}/{variant_tag}] saved {out_npy.name}, {out_png.name}  "
-                    f"TR={combined.shape[1]}  mean off-diag r={off_diag.mean():.3f}"
-                )
+            off_diag = fc[~np.eye(NPARCEL, dtype=bool)]
+            print(
+                f"[{r}/{variant_tag}] saved {out_npy.name}, {out_png.name}  "
+                f"TR={combined.shape[1]}  mean off-diag r={off_diag.mean():.3f}"
+            )
 
     print("\ndone")
 

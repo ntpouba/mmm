@@ -20,13 +20,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from confounds import VARIANT_TAGS
-
-SUBJECTS = ["sub-03", "sub-04", "sub-05"]
-RUNS = ["run-01", "run-02"]
+from layout import fc_bynetwork_png, fc_matrix, iter_runs
 
 NPARCEL = 400
-FC_DIR = Path("scratch/fc_matrices")
-OUT_DIR = Path("scratch/fc_matrices_bynetwork")
 ORDER_TXT = Path("standard/Schaefer2018_400Parcels_17Networks_order.txt")
 
 # Canonical Yeo-7 order (matches the reference figure's axis order), plus
@@ -98,21 +94,18 @@ def plot_fc_by_network(fc, labels, title, out_path):
 def main():
     labels = load_network_labels()
 
-    for subject in SUBJECTS:
-        for run in RUNS:
-            run_out_dir = OUT_DIR / subject / run
-            run_out_dir.mkdir(parents=True, exist_ok=True)
+    for r in iter_runs():
+        for variant_tag in VARIANT_TAGS:
+            fc_path = fc_matrix(r, variant_tag)
+            if not fc_path.exists():
+                print(f"[{r}/{variant_tag}] missing {fc_path}, skipping (run compute_fc_matrix.py first)")
+                continue
+            fc = np.load(fc_path)
 
-            for variant_tag in VARIANT_TAGS:
-                fc_path = FC_DIR / f"{subject}_{run}_{variant_tag}_fc400.npy"
-                if not fc_path.exists():
-                    print(f"[{subject}/{run}/{variant_tag}] missing {fc_path}, skipping (run compute_fc_matrix.py first)")
-                    continue
-                fc = np.load(fc_path)
-
-                out = run_out_dir / f"{variant_tag}_fc400_bynetwork.png"
-                plot_fc_by_network(fc, labels, f"{subject} {run} FC ({variant_tag}, by network)", out)
-                print(f"[{subject}/{run}/{variant_tag}] saved {out}")
+            out = fc_bynetwork_png(r, variant_tag)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            plot_fc_by_network(fc, labels, f"{r} FC ({variant_tag}, by network)", out)
+            print(f"[{r}/{variant_tag}] saved {out}")
 
     print("\ndone")
 

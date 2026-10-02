@@ -58,8 +58,10 @@ from audio_envelope import ENVELOPE_KINDS, get_audio_envelopes, stimulus_status
 
 from atlas import ORDER_TXT
 from confounds import VARIANT_TAGS
-# RUNS are searched per subject; whichever run holds the clip is used
-from layout import RUNS, SUBJECTS, Run, parcels
+from layout import Run, iter_runs, parcels
+
+RUNS = ['run-01', 'run-02']  # searched per subject; whichever run holds the clip is used
+SUBJECTS = sorted({r.sub for r in iter_runs(task='NATencoding')})
 
 MAX_LAG = 20     # TRs (+-30s)
 
@@ -106,7 +108,7 @@ def slugify(name):
 
 
 def parcel_path(subject, session, run, variant_tag):
-    return parcels(Run(subject, session, run), variant_tag)
+    return parcels(Run(subject, session, 'NATencoding', run), variant_tag)
 
 
 def movie_mask(df, movie_name):

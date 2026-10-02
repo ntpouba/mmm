@@ -48,7 +48,7 @@ OUT_DIR_NETWORK = Path("scratch/isfc_matrices_bynetwork")
 
 def load_movie_segment(subject, variant_tag):
     loc = CLIP_LOCATIONS[subject]
-    combined = np.load(parcels(Run(subject, CLIP_SESSION, loc["run"]), variant_tag))  # (NPARCEL, TR_total)
+    combined = np.load(parcels(Run(subject, CLIP_SESSION, "NATencoding", loc["run"]), variant_tag))  # (NPARCEL, TR_total)
     start = round(loc["onset_tr"])
     end = start + N_TR
     if end > combined.shape[1]:

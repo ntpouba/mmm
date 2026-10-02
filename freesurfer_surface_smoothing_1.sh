@@ -1,18 +1,24 @@
 #! /bin/bash
 # use freesurfer mri_surf2surf to smooth functional images preprocessed with fmriprep
-# to be run on the lab server
 # hongmi lee 5/30/22
 #
-# Inputs are read from the flat working dir data/sub-XX/func/ -- copy a session's
-# fmriprep giis there from data/sub-0XX/ses-YY/func/ before running.
+# Smooths ONE fsaverage6 surface file. postprocess.py calls this once per run
+# and hemisphere, writing into a temp dir it deletes once the run is
+# parcellated. Can also be run by hand:
 #
-# Which runs to smooth, and every input/output path, come from layout.py
-# (`python3 layout.py smooth-jobs`); add a session there as it is staged. Runs
-# whose input is not present are reported and skipped, so this is safe to
-# re-run while only part of the data is in place. Outputs that already exist
-# are left alone unless --force is passed.
+#   freesurfer_surface_smoothing_1.sh <lh|rh> <input.func.gii> <output.func.gii>
+#
+# Exits non-zero on any failure, leaving no partial output behind.
 
-LAYOUT=$(dirname "$0")/layout.py
+if [ $# -ne 3 ]; then
+    echo "usage: $0 <lh|rh> <input.func.gii> <output.func.gii>" >&2
+    exit 2
+fi
+fs_hemi=$1
+sval=$2
+tval=$3
+
+smoothfwhm=4
 
 # mri_surf2surf resolves `--s fsaverage6` inside $SUBJECTS_DIR, not as a path.
 # Set it explicitly: an inherited SUBJECTS_DIR pointing at a dataset collection
@@ -22,63 +28,32 @@ LAYOUT=$(dirname "$0")/layout.py
 export SUBJECTS_DIR=${SUBJECTS_DIR_OVERRIDE:-${FREESURFER_HOME}/subjects}
 
 if [ ! -f "${SUBJECTS_DIR}/fsaverage6/surf/lh.sphere.reg" ]; then
-    echo "ERROR: no fsaverage6 surfaces under SUBJECTS_DIR=${SUBJECTS_DIR}"
-    echo "       expected ${SUBJECTS_DIR}/fsaverage6/surf/lh.sphere.reg"
+    echo "ERROR: no fsaverage6 surfaces under SUBJECTS_DIR=${SUBJECTS_DIR}" >&2
+    echo "       expected ${SUBJECTS_DIR}/fsaverage6/surf/lh.sphere.reg" >&2
     exit 1
 fi
-echo "SUBJECTS_DIR=${SUBJECTS_DIR}"
 
-smoothfwhm=4  # must match the desc-sm4 output names in layout.py
-
-force=0
-if [ "$1" = "--force" ]; then
-    force=1
-    echo "--force: existing smoothed files will be overwritten"
+if [ "${fs_hemi}" != "lh" ] && [ "${fs_hemi}" != "rh" ]; then
+    echo "ERROR: hemi must be lh or rh, got '${fs_hemi}'" >&2
+    exit 2
 fi
 
-n_done=0
-n_skipped=0
-n_missing=0
-n_failed=0
+if [ ! -f "${sval}" ]; then
+    echo "ERROR: missing input ${sval}" >&2
+    exit 1
+fi
 
-job_list=$(python3 "${LAYOUT}" smooth-jobs) || { echo "ERROR: ${LAYOUT} smooth-jobs failed"; exit 1; }
-
-while IFS=$'\t' read -r fs_hemi sval tval; do
-
-    [ -n "${fs_hemi}" ] || continue   # empty job list still yields one blank line
-
-    if [ ! -f "${sval}" ]; then
-        echo "[missing] ${sval}"
-        n_missing=$((n_missing + 1))
-        continue
+if mri_surf2surf --s fsaverage6 --hemi ${fs_hemi} \
+    --sval "${sval}" --fwhm ${smoothfwhm} --tval "${tval}" </dev/null; then
+    # mri_surf2surf can exit 0 having written nothing usable
+    if [ ! -s "${tval}" ]; then
+        echo "ERROR: ${tval} was not written" >&2
+        rm -f "${tval}"
+        exit 1
     fi
-
-    if [ -f "${tval}" ] && [ ${force} -eq 0 ]; then
-        echo "[exists ] ${tval}"
-        n_skipped=$((n_skipped + 1))
-        continue
-    fi
-
-    echo "[smooth ] $(basename "${sval}")"
-    if mri_surf2surf --s fsaverage6 --hemi ${fs_hemi} \
-        --sval "${sval}" --fwhm ${smoothfwhm} --tval "${tval}" </dev/null; then
-        # mri_surf2surf can exit 0 having written nothing usable
-        if [ -s "${tval}" ]; then
-            n_done=$((n_done + 1))
-        else
-            echo "[FAILED ] ${tval} was not written"
-            n_failed=$((n_failed + 1))
-        fi
-    else
-        echo "[FAILED ] mri_surf2surf exited $? for $(basename "${sval}")"
-        rm -f "${tval}"   # don't leave a truncated file to be skipped next run
-        n_failed=$((n_failed + 1))
-    fi
-
-done <<< "${job_list}"
-
-echo
-echo "smoothed ${n_done}, already present ${n_skipped}, inputs missing ${n_missing}, FAILED ${n_failed}"
-if [ ${n_failed} -gt 0 ]; then
+else
+    status=$?
+    echo "ERROR: mri_surf2surf exited ${status} for ${sval}" >&2
+    rm -f "${tval}"   # don't leave a truncated file behind
     exit 1
 fi

@@ -13,3 +13,6 @@ wheels/
 data/
 standard/
 scratch/
+
+# pipeline outputs (parcellated timecourses)
+derivatives/

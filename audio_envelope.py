@@ -1,3 +1,4 @@
+from functools import lru_cache
 from pathlib import Path
 import numpy as np
 import scipy.io.wavfile as wav
@@ -5,15 +6,22 @@ import scipy.signal
 import av
 
 BASEPATH = Path(__file__).parent
-STIMPATH = BASEPATH / 'data' / 'stimuli'
+STIMPATH = BASEPATH / 'data' / 'stimuli' / 'movies'
+CACHEPATH = BASEPATH / 'data' / 'stimuli' / 'envelopes'
 TR = 1.5
 
 _AUDIO_EXTS = {'.wav', '.mov', '.mp4', '.m4a', '.mp3'}
 
-# The envelope definitions available from get_audio_envelopes(). They are the
-# 2x2 of frequency weighting (flat / A-weighted) x amplitude compression
-# (linear / log), so any difference between them is attributable to one factor.
-ENVELOPE_KINDS = ('linear', 'log', 'aweight', 'dbA')
+# The envelope definitions available from get_audio_envelopes():
+#   linear  mean Hilbert magnitude of the raw waveform per window
+#   dBA     A-weighted equivalent sound level (dBA) of each window, computed in
+#           the frequency domain (from a_weighted_loudness.py)
+ENVELOPE_KINDS = ('linear', 'dBA')
+
+# dBA settings, as in a_weighted_loudness.py
+DBA_FREQ_MIN_HZ = 50
+DBA_FREQ_MAX_HZ = 8000
+DBA_WELCH_SEGMENT = 2048
 
 # Explicit overrides, only needed when auto-discovery by slug is ambiguous
 # or the filename doesn't start with the movie name's slug.
@@ -29,10 +37,13 @@ def _resolve_stim_path(condname):
     if slug in _CONDNAME_TO_FILE:
         return STIMPATH / _CONDNAME_TO_FILE[slug]
 
+    # Case-insensitive: the movie files are inconsistently capitalised
+    # (Body-Double_..., the-bench_...).
     candidates = [
-        p for p in STIMPATH.glob(f'{slug}*')
+        p for p in STIMPATH.iterdir()
         if p.suffix.lower() in _AUDIO_EXTS
-    ]
+        and (p.stem.lower() == slug or p.name.lower().startswith(slug + '_'))
+    ] if STIMPATH.is_dir() else []
     if not candidates:
         raise FileNotFoundError(
             f"No stimulus file for condname={condname!r} (slug={slug!r}) in {STIMPATH}"
@@ -93,103 +104,108 @@ def _load_audio(path):
     return _load_audio_via_pyav(path)
 
 
-def _a_weighting_sos(fs):
-    """IEC 61672 A-weighting as second-order sections at sample rate `fs`.
+def _a_weighting_db(freqs):
+    """IEC 61672 A-weighting magnitude in dB at each frequency, 0 dB at 1 kHz."""
+    f2 = np.asarray(freqs, dtype=float) ** 2
+    response = (12194 ** 2 * f2 ** 2
+                / ((f2 + 20.6 ** 2)
+                   * np.sqrt((f2 + 107.7 ** 2) * (f2 + 737.9 ** 2))
+                   * (f2 + 12194 ** 2)))
+    return 20 * np.log10(response) + 2.0
 
-    The analog prototype has four zeros at DC and poles at 20.6/107.7/737.9/
-    12194.2 Hz (the first and last doubled), normalised to 0 dB at 1 kHz. It
-    approximates the 40-phon equal-loudness contour: strong attenuation below
-    ~500 Hz and above ~10 kHz, i.e. the energy the cochlea is least sensitive
-    to. Bilinear transform warps the response near Nyquist, which is the usual
-    and harmless caveat at audio rates.
+
+def _volume_windows(n_samples, fs, scan_start):
+    """[start, end) sample bounds of each volume's audio window.
+
+    Volume k represents time t_k = scan_start + k*TR on the clip's audio clock,
+    and its window is centred on it: [t_k - TR/2, t_k + TR/2). Volumes are
+    generated while t_k is inside the audio; windows are clipped to the audio,
+    so the first and last can be partial.
     """
-    f1, f2, f3, f4 = 20.598997, 107.65265, 737.86223, 12194.217
-    a1000 = 1.9997  # dB of gain the prototype has at 1 kHz; divided back out
-    pi = np.pi
-
-    num = [(2 * pi * f4) ** 2 * 10 ** (a1000 / 20.0), 0, 0, 0, 0]
-    den = np.polymul([1, 4 * pi * f4, (2 * pi * f4) ** 2],
-                     [1, 4 * pi * f1, (2 * pi * f1) ** 2])
-    den = np.polymul(np.polymul(den, [1, 2 * pi * f3]), [1, 2 * pi * f2])
-
-    return scipy.signal.tf2sos(*scipy.signal.bilinear(num, den, fs))
+    n = max(int(np.ceil((n_samples / fs - scan_start) / TR)), 0)
+    times = scan_start + np.arange(n) * TR
+    start = np.clip(np.round((times - TR / 2) * fs), 0, n_samples).astype(int)
+    end = np.clip(np.round((times + TR / 2) * fs), 0, n_samples).astype(int)
+    return start, end
 
 
-def _a_weight(fs, signal):
-    """A-weight a waveform with zero phase distortion.
+def _window_means(values, start, end):
+    """Mean of `values` over each [start, end) window; NaN for an empty window."""
+    csum = np.concatenate([[0.0], np.cumsum(values)])
+    n = end - start
+    with np.errstate(invalid='ignore', divide='ignore'):
+        return np.where(n > 0, (csum[end] - csum[start]) / n, np.nan)
 
-    filtfilt rather than a one-pass filter is essential here: everything
-    downstream is a *lag* measurement, and a causal IIR would contribute its
-    own group delay that is indistinguishable from a hemodynamic shift.
+
+def _dba(fs, signal, start, end):
+    """A-weighted equivalent level (dBA re full scale) of each window.
+
+    Welch power spectral density, restricted to DBA_FREQ_MIN_HZ..MAX, weighted
+    by the A-curve in power (dB/10), integrated over frequency, then 10*log10.
+    The weighting is applied before the sum and the log. NaN where a window is
+    too short to resolve any frequency in range.
     """
-    return scipy.signal.sosfiltfilt(_a_weighting_sos(fs), signal)
+    out = np.full(len(start), np.nan)
+    for k, (s, e) in enumerate(zip(start, end)):
+        window = signal[s:e]
+        if len(window) < 2:
+            continue
+        freqs, psd = scipy.signal.welch(window, fs=fs,
+                                        nperseg=min(DBA_WELCH_SEGMENT, len(window)))
+        keep = (freqs >= DBA_FREQ_MIN_HZ) & (freqs < DBA_FREQ_MAX_HZ)
+        if not keep.any():
+            continue
+        weight = 10 ** (_a_weighting_db(freqs[keep]) / 10)
+        out[k] = 10 * np.log10((psd[keep] * weight).sum() * (freqs[1] - freqs[0]))
+    return out
 
 
-def _envelope_from_samples(fs, signal):
-    """Hilbert magnitude, averaged into one value per TR.
+@lru_cache(maxsize=1)
+def _decoded(condname):
+    """(fs, signal, |hilbert(signal)|) for one clip.
 
-    The per-TR mean is taken as a plain block average rather than with
-    resample_poly. Decimating by int(fs * TR) -- 66150 at 44.1 kHz -- in a
-    single stage builds a ~1.3M-tap FIR that rings and overshoots below zero,
-    which is impossible for a magnitude and used to leave a couple of negative
-    samples per clip. Those artificial near-zero samples are what previously
-    forced a floor on the log envelopes. A block mean is exactly "mean
-    amplitude per TR", cannot ring, and stays strictly positive.
-
-    Any trailing partial TR is dropped; callers already truncate the envelope
-    and the BOLD timecourse to their common length.
+    Kept in memory for the most recent clip, since a clip is usually windowed
+    at several offsets (one per subject) in a row.
     """
-    envelope = np.abs(scipy.signal.hilbert(signal))
-    q = int(fs * TR)
-    n = len(envelope) // q
-    return envelope[:n * q].reshape(n, q).mean(axis=1)
+    stim_path = _resolve_stim_path(condname)
+    print(f'  decoding {condname} ({stim_path.name})...')
+    fs, signal = _load_audio(stim_path)
+    return fs, signal, np.abs(scipy.signal.hilbert(signal))
 
 
-def get_audio_envelopes(condname):
-    """All of ENVELOPE_KINDS for one clip, as a dict of (n_TRs,) arrays.
+def get_audio_envelopes(condname, scan_start):
+    """All of ENVELOPE_KINDS for one clip, as a dict of (n_volumes,) arrays.
 
-    Only the two Hilbert envelopes are cached, since decoding the audio and
-    running two Hilbert transforms is the entire cost. The log pair is derived
-    on each call, so changing how compression is done never invalidates a cache.
+    scan_start is where the first volume of the BOLD it will be compared with
+    sits on the clip's audio clock, in seconds (negative if before the clip
+    began), including any slice-timing reference. Every kind uses the same
+    centred windows (see _volume_windows); linear is the mean magnitude per
+    window.
+
+    Results are cached per (clip, scan_start to the ms).
     """
     slug = _slugify(condname)
-    cache = STIMPATH / f'{slug}_envelopes.npz'
+    offset_ms = int(round(scan_start * 1000))
+    cache = CACHEPATH / f'{slug}_{offset_ms:+d}ms.npz'
 
     if cache.exists():
         cached = np.load(cache)
-        linear, aweight = cached['linear'], cached['aweight']
+        linear, dba = cached['linear'], cached['dBA']
     else:
-        stim_path = _resolve_stim_path(condname)
-        print(f'  computing envelopes for {condname} ({stim_path.name})...')
+        fs, signal, linear_env = _decoded(condname)
+        start, end = _volume_windows(len(signal), fs, offset_ms / 1000)
+        linear = _window_means(linear_env, start, end)
+        dba = _dba(fs, signal, start, end)
 
-        fs, signal = _load_audio(stim_path)
-        linear = _envelope_from_samples(fs, signal)
-        aweight = _envelope_from_samples(fs, _a_weight(fs, signal))
+        CACHEPATH.mkdir(parents=True, exist_ok=True)
+        np.savez(cache, linear=linear, dBA=dba)
+        print(f'  saved → {cache}  ({len(linear)} volumes)')
 
-        np.savez(cache, linear=linear, aweight=aweight)
-        print(f'  saved → {cache}  ({len(linear)} TRs)')
-
-    # A block-averaged magnitude cannot be <= 0 unless the clip contains a
-    # genuinely silent TR, which would make the log envelopes meaningless.
-    # Fail loudly rather than quietly clamping to an arbitrary floor.
-    for name, env in (('linear', linear), ('aweight', aweight)):
-        if env.min() <= 0:
-            raise ValueError(
-                f'{condname}: {name} envelope has {(env <= 0).sum()} non-positive '
-                f'sample(s) (min={env.min():.3g}); the log envelopes need a floor. '
-                f'Delete {cache} and check the clip for digital silence.'
-            )
-
-    return {
-        'linear': linear,
-        'log': np.log10(linear),
-        'aweight': aweight,
-        'dbA': np.log10(aweight),
-    }
+    return {'linear': linear, 'dBA': dba}
 
 
-def get_audio_envelope(condname, kind='linear'):
+def get_audio_envelope(condname, scan_start, kind='linear'):
     """One named envelope for a clip. See ENVELOPE_KINDS."""
     if kind not in ENVELOPE_KINDS:
         raise ValueError(f'unknown envelope kind {kind!r}; expected one of {ENVELOPE_KINDS}')
-    return get_audio_envelopes(condname)[kind]
+    return get_audio_envelopes(condname, scan_start)[kind]

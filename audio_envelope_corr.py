@@ -1,65 +1,26 @@
-"""
-Sanity check using individual movie clips cropped out of the encoding runs
-(data/stimuli/<slug>*): for each requested movie, does the audio envelope ->
-lag-correlation pipeline work against real stimulus audio and real
-auditory-cortex BOLD?
-
-Crop each subject's auditory-ROI timecourse to the onset/duration window
-movie_order.csv declares for the clip and lag-correlate it against the clip's
-own audio envelope. The CSV's clip mapping is taken as correct.
-
-Four envelope definitions are compared at once (audio_envelope.ENVELOPE_KINDS),
-the 2x2 of frequency weighting x amplitude compression:
-  linear   Hilbert magnitude, as-is
-  log      log10 of the above -- loudness is perceived on a ratio scale
-  aweight  Hilbert magnitude of the A-weighted waveform (IEC 61672), which
-           discards the low/high frequency energy the cochlea barely responds to
-  dbA      both, i.e. the standard psychoacoustic loudness quantity
-All four appear on every figure so that a difference can be attributed to the
-weighting, to the compression, or to their combination. Weighting matters most
-for clips whose energy is dominated by something other than speech.
-
-Which session a clip is taken from is resolved from movie_order.csv rather than
-hardcoded: a clip is always read from the FIRST session in which it was shown.
-Two clips (The Bench, From Dad To Son) are shown ~10 times each across
-ses-19..ses-28 while the other 59 are one-shot, so pinning to the first showing
-keeps every number an exposure-matched first viewing. All three subjects happen
-to first see each clip in the same session, so this also keeps the
-cross-subject check comparing like with like. A clip whose first session has
-not been confound-regressed + parcellated yet is skipped rather than falling
-back to a later showing, which would silently compare a first viewing against a
-seventh.
-
-Within that session, the run is looked up per subject -- the same clip can sit
-in run-01 for one subject and run-02 for another.
-
-Usage:
-    python audio_envelope_corr.py                    # every runnable clip
-    python audio_envelope_corr.py "The Bench" "Big Take"
-
-With no arguments the script discovers every clip that has both a stimulus file
-and a parcellated first session. Named clips that cannot be run are reported in
-a skip summary at the end, together with any subject dropped for missing or
-malformed parcellated data.
-"""
 import argparse
+import json
 import sys
 
 import matplotlib
 matplotlib.use('Agg')  # must precede any pyplot import, including inside lag_corr
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
 import numpy as np
 import pandas as pd
 from pathlib import Path
 
-from lag_corr import lag_cor, plot_lag_result
-from audio_envelope import ENVELOPE_KINDS, get_audio_envelopes, stimulus_status
+from lag_corr import _CURVE_COLORS, lag_cor, plot_lag_result
+from audio_envelope import TR, get_audio_envelopes, stimulus_status
 
 from atlas import ORDER_TXT
-from confounds import VARIANT_TAGS
-from layout import Run, iter_runs, parcels
+from layout import Run, iter_runs, mni_bold, parcels
 
+VARIANT_TAGS = ['basecsfwm']
+# Shown in every session; every showing is plotted by repeated_movies_corr.py,
+# so they are left out of this script's default set of clips.
+REPEATED_MOVIES = ['The Bench', 'From Dad To Son']
 RUNS = ['run-01', 'run-02']  # searched per subject; whichever run holds the clip is used
 SUBJECTS = sorted({r.sub for r in iter_runs(task='NATencoding')})
 
@@ -74,9 +35,15 @@ PLAUSIBLE_LAG_RANGE = (-5, -2)   # TRs: audio leads BOLD by 3-7.5s
 R_THRESHOLD = 0.1
 
 ORDER_CSV = Path('movie_order.csv')
-# Nested <movie>/<subject>/<variant>.png -- movie and subject are the axes you
-# browse by; variant is the leaf file.
+# This script writes OUT_DIR/individual/<movie>/<subject>.png and
+# OUT_DIR/overview/{no-speech,speech-NN}.png (subjects x clips);
+# repeated_movies_corr.py writes OUT_DIR/repeated/.
+# The variant is not in the path (only one is run, see VARIANT_TAGS); it is in
+# each figure's title.
 OUT_DIR = Path('scratch/audio_envelope_corr')
+INDIVIDUAL_DIR = OUT_DIR / 'individual'
+OVERVIEW_DIR = OUT_DIR / 'overview'
+OVERVIEW_MAX_COLS = 7  # speech clips are spread evenly over as few grids as this allows
 
 
 def check_csv_internal_consistency(csv_path):
@@ -93,12 +60,11 @@ def check_csv_internal_consistency(csv_path):
     print()
 
 
-def get_auditory_rows(order_txt_path):
-    """0-indexed combined-matrix rows for every parcel whose name contains 'Aud'."""
+def get_roi_rows(order_txt_path, tag):
     rows = []
     for line in order_txt_path.read_text().splitlines():
         idx_str, name = line.split('\t')[:2]
-        if 'Aud' in name:
+        if tag in name:
             rows.append(int(idx_str) - 1)
     return sorted(rows)
 
@@ -112,14 +78,6 @@ def parcel_path(subject, session, run, variant_tag):
 
 
 def movie_mask(df, movie_name):
-    """Case-insensitive match against movie_order.csv's movie_name.
-
-    The CSV is not self-consistent about capitalisation: 'From Dad To Son' and
-    'From Dad to Son' are the same clip, the latter being how its ses-22 rows
-    happen to be spelled. An exact match would split one clip into two and
-    resolve the wrong first session -- ses-22 instead of ses-19, i.e. a fourth
-    viewing presented as a first.
-    """
     return df.movie_name.str.strip().str.casefold() == movie_name.strip().casefold()
 
 
@@ -179,29 +137,51 @@ def subject_preflight(subject, session, row):
     return True, None
 
 
+def crop_onset_idx(onset_tr):
+    return max(round(onset_tr), 0)
+
+
 def crop_window(combined, onset_tr, duration_tr):
-    onset_idx = max(round(onset_tr), 0)
+    onset_idx = crop_onset_idx(onset_tr)
     n_trs = round(duration_tr)
     end_idx = min(onset_idx + n_trs, combined.shape[1])
     return combined[:, onset_idx:end_idx]
 
 
-def compute_one(subject, session, variant_tag, row, envelopes, aud_rows):
-    """Lag-correlate one subject's auditory timecourse against every envelope
-    kind. Returns the curves themselves plus each kind's peak; plotting is
+def slice_time_reference(subject, session, run):
+    """Seconds after its trigger that a volume represents after fMRIPrep's
+    slice-timing correction (StartTime in the BOLD sidecar). The sidecar is
+    shared by every output space, so the MNI one stands in for fsaverage6."""
+    sidecar = Path(str(mni_bold(Run(subject, session, 'NATencoding', run)))
+                   .replace('.nii.gz', '.json'))
+    meta = json.loads(sidecar.read_text())
+    if not meta.get('SliceTimingCorrected'):
+        raise ValueError(f'{sidecar.name}: not slice-timing corrected')
+    return float(meta['StartTime'])
+
+
+def scan_start_in_clip(subject, session, row):
+    """Where the first cropped volume sits on the clip's audio clock, in seconds."""
+    volume_time = crop_onset_idx(row.movie_onset_TR) * TR
+    return (volume_time + slice_time_reference(subject, session, row.run)
+            - row.movie_onset_s)
+
+
+def compute_one(subject, session, variant_tag, row, features, roi_rows):
+    """Lag-correlate one subject's ROI timecourse against every stimulus
+    feature in `features` ({kind: per-volume trace}). Returns the curves themselves plus each kind's peak; plotting is
     deferred so that every figure can share one correlation axis. The data is
     assumed to have passed subject_preflight."""
     combined = np.load(parcel_path(subject, session, row.run, variant_tag))
 
     window = crop_window(combined, row.movie_onset_TR, row.movie_duration_TR)
-    aud_tc = window[aud_rows, :].mean(axis=0)
+    roi_tc = window[roi_rows, :].mean(axis=0)
 
     curves, peaks = {}, {}
-    for kind in ENVELOPE_KINDS:
-        envelope = envelopes[kind]
-        n = min(len(aud_tc), len(envelope))
+    for kind, feature in features.items():
+        n = min(len(roi_tc), len(feature))
 
-        lc = np.array(lag_cor(aud_tc[:n], envelope[:n], max_lag=MAX_LAG), dtype=float)
+        lc = np.array(lag_cor(roi_tc[:n], feature[:n], max_lag=MAX_LAG), dtype=float)
         curves[kind] = lc
 
         if np.all(np.isnan(lc)):
@@ -216,16 +196,16 @@ def compute_one(subject, session, variant_tag, row, envelopes, aud_rows):
     return {'curves': curves, 'peaks': peaks, 'run': row.run, 'session': session}
 
 
-def save_figure(subject, variant_tag, res, movie_name, ylim):
+def save_figure(subject, variant_tag, res, movie_name, ylim, out_dir=INDIVIDUAL_DIR):
     plot_lag_result(
         res['curves'], max_lag=MAX_LAG,
         title=f'{subject} {res["session"]} {res["run"]} {variant_tag} ({movie_name})',
         ylim=ylim,
     )
     fig = plt.gcf()
-    out_subdir = OUT_DIR / slugify(movie_name) / subject
-    out_subdir.mkdir(parents=True, exist_ok=True)
-    fig.savefig(out_subdir / f'{variant_tag}.png', dpi=150)
+    out_dir = out_dir / slugify(movie_name)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_dir / f'{subject}.png', dpi=150)
     plt.close(fig)
 
 
@@ -233,11 +213,11 @@ def shared_ylim(payloads, margin=0.05):
     """One correlation range covering every curve in every figure, so the whole
     set is comparable side by side."""
     values = np.concatenate([
-        res['curves'][kind]
+        curve
         for payload in payloads
         for results in payload.values()
         for res in results.values()
-        for kind in ENVELOPE_KINDS
+        for curve in res['curves'].values()
     ])
     lo, hi = float(np.nanmin(values)), float(np.nanmax(values))
     pad = (hi - lo) * margin
@@ -263,14 +243,15 @@ def format_peak(peak):
     return f'{lag:+d}TR r={r:.3f}{"*" if is_plausible(peak) else " "}'
 
 
-def print_summary(variant_tag, results, movie_name):
+def print_summary(variant_tag, results, movie_name, out_dir=INDIVIDUAL_DIR):
+    kinds = list(next(iter(results.values()))['curves'])
     print(f'--- Variant: {variant_tag} ---')
 
     print('=== Check 1: pipeline sanity (* = plausible lag and r above threshold) ===')
     print(f'{"subject":10s}{"session":10s}{"run":9s}'
-          + ''.join(f'{k:>16s}' for k in ENVELOPE_KINDS))
+          + ''.join(f'{k:>16s}' for k in kinds))
     for sub, res in results.items():
-        cells = ''.join(f'{format_peak(res["peaks"][k]):>16s}' for k in ENVELOPE_KINDS)
+        cells = ''.join(f'{format_peak(res["peaks"][k]):>16s}' for k in kinds)
         print(f'{sub:10s}{res["session"]:10s}{res["run"]:9s}{cells}')
     print()
 
@@ -278,7 +259,7 @@ def print_summary(variant_tag, results, movie_name):
     if len(results) < 2:
         print('only one subject has usable data for this clip -> skipped')
     else:
-        for kind in ENVELOPE_KINDS:
+        for kind in kinds:
             lags = [res['peaks'][kind]['peak_lag'] for res in results.values()]
             if any(lag is None for lag in lags):
                 print(f'{kind:>10s}: a subject has no usable peak -> skipped')
@@ -287,7 +268,7 @@ def print_summary(variant_tag, results, movie_name):
             print(f'{kind:>10s}: peak lags {lags} (spread={spread} TR) '
                   f'-> {"PASS" if spread <= 2 else "CHECK"} (coherent)')
     print()
-    print(f'Figures saved under {OUT_DIR / slugify(movie_name)}/<subject>/{variant_tag}.png')
+    print(f'Figures saved under {out_dir / slugify(movie_name)}/<subject>.png')
 
 
 def resolve_movie(df, movie_name):
@@ -333,7 +314,7 @@ def discover_movies(df):
     return [m for m in names if resolve_movie(df, m)[2] is None]
 
 
-def compute_movie(movie_name, df, aud_rows, skips):
+def compute_movie(movie_name, df, roi_rows, skips, get_features=get_audio_envelopes):
     """Every lag curve for one clip: {variant_tag: {subject: result}}.
 
     Returns (payload, notes). payload is None when the clip cannot be run;
@@ -348,7 +329,10 @@ def compute_movie(movie_name, df, aud_rows, skips):
         return None, [f'[skip] {reason}']
 
     try:
-        envelopes = get_audio_envelopes(movie_name)
+        features = {
+            subject: get_features(movie_name, scan_start_in_clip(subject, session, row))
+            for subject, row in rows.items()
+        }
     except (FileNotFoundError, ValueError) as e:
         skips.append((movie_name, None, str(e)))
         return None, [f'[skip] {e}']
@@ -361,7 +345,7 @@ def compute_movie(movie_name, df, aud_rows, skips):
 
     payload = {
         variant_tag: {
-            subject: compute_one(subject, session, variant_tag, row, envelopes, aud_rows)
+            subject: compute_one(subject, session, variant_tag, row, features[subject], roi_rows)
             for subject, row in rows.items()
         }
         for variant_tag in VARIANT_TAGS
@@ -369,7 +353,7 @@ def compute_movie(movie_name, df, aud_rows, skips):
     return payload, notes
 
 
-def render_movie(movie_name, payload, notes, ylim):
+def render_movie(movie_name, payload, notes, ylim, out_dir=INDIVIDUAL_DIR):
     print(f'\n{"=" * 60}\nMovie: {movie_name}\n{"=" * 60}')
     for note in notes:
         print(note)
@@ -378,8 +362,107 @@ def render_movie(movie_name, payload, notes, ylim):
 
     for variant_tag, results in payload.items():
         for subject, res in results.items():
-            save_figure(subject, variant_tag, res, movie_name, ylim)
-        print_summary(variant_tag, results, movie_name)
+            save_figure(subject, variant_tag, res, movie_name, ylim, out_dir)
+        print_summary(variant_tag, results, movie_name, out_dir)
+
+
+def save_overview(name, label, movies, variant_tag, ylim, out_dir=OVERVIEW_DIR, stimulus='audio'):
+    """One grid: rows = SUBJECTS, columns = clips, each panel the same curves
+    as the individual figure. `movies` is [(movie_name, {subject: result})]."""
+    lags = np.arange(-MAX_LAG, MAX_LAG + 1)
+    kinds = list(next(r for _, results in movies for r in results.values())['curves'])
+    nrow, ncol = len(SUBJECTS), len(movies)
+    fig, axes = plt.subplots(nrow, ncol, figsize=(2.9 * ncol, 2.3 * nrow),
+                             sharex=True, sharey=True, squeeze=False,
+                             constrained_layout=True)
+
+    for j, (movie_name, results) in enumerate(movies):
+        axes[0, j].set_title(movie_name, fontsize=9)
+        for i, subject in enumerate(SUBJECTS):
+            ax = axes[i, j]
+            ax.axvline(0, color='k', linestyle='--', linewidth=0.6)
+            ax.grid(True, alpha=0.4)
+            ax.tick_params(labelsize=7)
+            res = results.get(subject)
+            if res is None:
+                ax.text(0.5, 0.5, 'no data', transform=ax.transAxes,
+                        ha='center', va='center', fontsize=8, color='0.5')
+                continue
+            labels = []
+            for k, kind in enumerate(kinds):
+                color = _CURVE_COLORS[k % len(_CURVE_COLORS)]
+                ax.plot(lags, res['curves'][kind], color=color, linewidth=1)
+                peak = res['peaks'][kind]
+                if peak['peak_lag'] is not None:
+                    ax.plot(peak['peak_lag'], peak['peak_r'], 'o', color=color,
+                            markersize=4, markeredgecolor='k', markeredgewidth=0.5)
+                    labels.append((f'{peak["peak_lag"]:+d} r={peak["peak_r"]:.2f}', color))
+            for k, (text, color) in enumerate(labels):
+                ax.text(0.98, 0.97 - 0.11 * k, text, transform=ax.transAxes,
+                        ha='right', va='top', fontsize=7, color=color)
+
+    for i, subject in enumerate(SUBJECTS):
+        axes[i, 0].set_ylabel(subject, fontsize=9)
+    for j in range(ncol):
+        axes[-1, j].set_xlabel('Lag (TR)', fontsize=8)
+    axes[0, 0].set_ylim(*ylim)
+
+    handles = [Line2D([], [], color=_CURVE_COLORS[k % len(_CURVE_COLORS)], linewidth=1.5)
+               for k in range(len(kinds))]
+    fig.legend(handles, kinds, loc='outside lower center',
+               ncol=len(kinds), fontsize=8, frameon=False)
+    fig.suptitle(f'{label}: first showing of each clip, {variant_tag} '
+                 f'(negative lag = {stimulus} leads BOLD)', fontsize=10)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f'{name}.png'
+    fig.savefig(out, dpi=150)
+    plt.close(fig)
+    return out
+
+
+def has_speech(df, movie_name):
+    """False for clips movie_order.csv labels as having no, almost no or very
+    little speech. Blank style cells are ignored (one The Bench row has one)."""
+    styles = df.loc[movie_mask(df, movie_name), 'style'].dropna().str.casefold()
+    return not styles.str.contains(r'no speech|very little').any()
+
+
+def split_evenly(items, max_cols):
+    """Fewest chunks of at most max_cols, sizes differing by at most one."""
+    n_chunks = -(-len(items) // max_cols)
+    base, extra = divmod(len(items), n_chunks)
+    chunks, i = [], 0
+    for k in range(n_chunks):
+        size = base + (k < extra)
+        chunks.append(items[i:i + size])
+        i += size
+    return chunks
+
+
+def render_overviews(computed, ylim, df):
+    """One grid of every no-speech clip, then the speech clips spread evenly
+    over grids of at most OVERVIEW_MAX_COLS columns. Clips keep the order they
+    were computed in (first session, then name)."""
+    OVERVIEW_DIR.mkdir(parents=True, exist_ok=True)
+    for old in OVERVIEW_DIR.glob('*.png'):  # grid count changes as clips are added
+        old.unlink()
+
+    for variant_tag in VARIANT_TAGS:
+        movies = [(m, payload[variant_tag]) for m, payload, _ in computed if payload is not None]
+        silent = [mv for mv in movies if not has_speech(df, mv[0])]
+        speech = [mv for mv in movies if has_speech(df, mv[0])]
+
+        grids = []
+        if silent:
+            grids.append(('no-speech', 'No / minimal speech', silent))
+        chunks = split_evenly(speech, OVERVIEW_MAX_COLS) if speech else []
+        for k, chunk in enumerate(chunks, 1):
+            grids.append((f'speech-{k:02d}', f'Speech ({k}/{len(chunks)})', chunk))
+
+        for name, label, grid_movies in grids:
+            out = save_overview(name, label, grid_movies, variant_tag, ylim)
+            print(f'overview -> {out}  ({len(grid_movies)} clips)')
 
 
 def print_skip_report(skips):
@@ -395,19 +478,32 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=(__doc__ or '').split('\n\n')[0])
     parser.add_argument('movies', nargs='*',
                         help='clip names as they appear in movie_order.csv; '
-                             'default is every clip that is currently runnable')
+                             'default is every clip that is currently runnable, '
+                             'except REPEATED_MOVIES')
+    parser.add_argument('--exclude', nargs='+', default=[], metavar='MOVIE',
+                        help='clip names to leave out (matched case-insensitively)')
     args = parser.parse_args(argv)
 
     check_csv_internal_consistency(ORDER_CSV)
 
-    aud_rows = get_auditory_rows(ORDER_TXT)
+    aud_rows = get_roi_rows(ORDER_TXT, 'Aud')
     print(f'Auditory ROI: {len(aud_rows)} parcels, rows={aud_rows}')
 
     df = pd.read_csv(ORDER_CSV)
 
-    movies = args.movies or discover_movies(df)
+    excluded = {m.strip().casefold() for m in args.exclude}
+    if not args.movies:
+        excluded |= {m.casefold() for m in REPEATED_MOVIES}
+    candidates = args.movies or discover_movies(df)
+    movies = [m for m in candidates if m.strip().casefold() not in excluded]
+    left_out = [m for m in candidates if m.strip().casefold() in excluded]
+    if left_out:
+        print(f'Excluded ({len(left_out)}): {", ".join(left_out)}')
+    if not movies and left_out:
+        print('\nevery clip was excluded')
+        return 1
     if not movies:
-        print('\nno runnable clips found -- need a stimulus file in data/stimuli/ '
+        print('\nno runnable clips found -- need a stimulus file in data/stimuli/movies/ '
               'and parcellated data for the clip\'s first session')
         return 1
     print(f'Clips to check ({len(movies)}): {", ".join(movies)}')
@@ -428,6 +524,8 @@ def main(argv=None):
 
     for movie_name, payload, notes in computed:
         render_movie(movie_name, payload, notes, ylim)
+    print()
+    render_overviews(computed, ylim, df)
 
     print_skip_report(skips)
     return 0

@@ -11,6 +11,7 @@ def lag_cor(vec1, vec2, max_lag=20):
     Compute Pearson correlations between vec1 and vec2 at lags from -max_lag to +max_lag.
     Returns a list of length (2*max_lag + 1), with np.nan where windows are too short.
     """
+    vec1, vec2 = np.asarray(vec1, dtype=float), np.asarray(vec2, dtype=float)
     correlations = []
     n = min(len(vec1), len(vec2))
     lags = range(-max_lag, max_lag + 1)
@@ -26,12 +27,14 @@ def lag_cor(vec1, vec2, max_lag=20):
             v1_window = vec1[:n]
             v2_window = vec2[:n]
 
-        if len(v1_window) < 2 or len(v2_window) < 2:
+        # pairs where either side is NaN (e.g. an edge window with no audio) are left out
+        valid = np.isfinite(v1_window) & np.isfinite(v2_window)
+        if valid.sum() < 2:
             correlations.append(np.nan)
             continue
 
         try:
-            r, _ = pearsonr(v1_window, v2_window)
+            r, _ = pearsonr(v1_window[valid], v2_window[valid])
             correlations.append(r)
         except Exception:
             correlations.append(np.nan)

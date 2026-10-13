@@ -8,7 +8,7 @@ gradient. Cropping, envelope alignment and the lag convention are exactly as in
 audio_envelope_corr.py (negative lag = audio leads BOLD).
 
 Usage:
-    python repeated_movies_corr.py
+    uv run python -m mmm.analyses.lag_correlation.audio_repeated_corr
 """
 import sys
 
@@ -20,11 +20,12 @@ from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
 
-from atlas import ORDER_TXT
-from audio_envelope import get_audio_envelopes
-from audio_envelope_corr import (MAX_LAG, ORDER_CSV, OUT_DIR, REPEATED_MOVIES, RUNS, SUBJECTS,
-                                 VARIANT_TAGS, compute_one, get_roi_rows, movie_mask,
-                                 scan_start_in_clip, slugify, subject_preflight)
+from mmm.utils.atlas import ORDER_TXT
+from mmm.utils.layout import ORDER_CSV
+from mmm.analyses.lag_correlation.audio_envelope import get_audio_envelopes
+from mmm.analyses.lag_correlation.audio_envelope_corr import (
+    MAX_LAG, OUT_DIR, REPEATED_MOVIES, RUNS, SUBJECTS, VARIANT_TAGS, compute_one,
+    get_roi_rows, movie_mask, scan_start_in_clip, slugify, subject_preflight)
 
 KIND = 'dBA'
 CMAP = plt.get_cmap('viridis_r')

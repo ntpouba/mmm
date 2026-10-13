@@ -2,18 +2,18 @@
 Post-fmriprep pipeline, one run at a time:
 
     raw fsaverage6 .func.gii (DATASET)
-      -> freesurfer_surface_smoothing_1.sh   4mm FWHM, into a temp dir
+      -> smooth_surface.sh   4mm FWHM, into a temp dir
       -> regress_out_confounds.py            per confound variant, z-scored
       -> extract_parcel_timecourses.py       Schaefer-400 parcel means
       -> derivatives/<sub>/<ses>/func/<prefix>_space-fsaverage6_desc-schaefer400<variant>.npy
 
 The smoothed surfaces are the only intermediate on disk; they live in a temp
-dir under scratch/tmp/ that is deleted as soon as the run is done (or fails).
+dir under outputs/tmp/ that is deleted as soon as the run is done (or fails).
 Runs whose parcels already exist for every variant are skipped unless --force.
 
 Usage:
-    python postprocess.py                                   # every run of every task
-    python postprocess.py --task NATencoding --sessions ses-19 ses-20 --jobs 4
+    uv run python -m mmm.pipeline.postprocess                   # every run of every task
+    uv run python -m mmm.pipeline.postprocess --task NATencoding --sessions ses-19 ses-20 --jobs 4
 """
 import argparse
 import os
@@ -21,18 +21,18 @@ import subprocess
 import sys
 import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from confounds import CONFOUND_VARIANTS, build_covariates
-from extract_parcel_timecourses import parcellate
-from layout import HEMIS, ROOT, SCRATCH, TASKS, confounds_tsv, iter_runs, parcels, surf_bold
-from regress_out_confounds import load_surface, regress_zscore
+from mmm.utils.confounds import CONFOUND_VARIANTS, build_covariates
+from mmm.pipeline.extract_parcel_timecourses import parcellate
+from mmm.utils.layout import HEMIS, TASKS, TMP, confounds_tsv, iter_runs, parcels, surf_bold
+from mmm.pipeline.regress_out_confounds import load_surface, regress_zscore
 
-SMOOTH_SH = ROOT / "freesurfer_surface_smoothing_1.sh"
-TMP_DIR = SCRATCH / "tmp"
+SMOOTH_SH = Path(__file__).parent / "smooth_surface.sh"
 
 
 def process_run(r, force):
@@ -47,7 +47,7 @@ def process_run(r, force):
         return "failed", f"missing raw input {', '.join(missing)}"
 
     try:
-        with tempfile.TemporaryDirectory(dir=TMP_DIR, prefix=f"{r.prefix}_") as tmp:
+        with tempfile.TemporaryDirectory(dir=TMP, prefix=f"{r.prefix}_") as tmp:
             epi = {}
             for hemi, fs_hemi in HEMIS.items():
                 smoothed = os.path.join(tmp, f"hemi-{hemi}_desc-sm4_bold.func.gii")
@@ -93,7 +93,7 @@ def main():
 
     runs = list(iter_runs(task=args.task, subjects=args.subjects, sessions=args.sessions))
     print(f"{len(runs)} runs discovered")
-    TMP_DIR.mkdir(parents=True, exist_ok=True)
+    TMP.mkdir(parents=True, exist_ok=True)
 
     counts = {"done": 0, "skipped": 0, "failed": 0}
     with ProcessPoolExecutor(max_workers=args.jobs) as pool:

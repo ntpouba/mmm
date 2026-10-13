@@ -20,14 +20,13 @@ Orientation matters when reading these matrices:
 The diagonal (p, p) is the one place direction collapses -- it is the same
 cell either way, and is the standard leave-one-out ISC for that parcel.
 """
-from pathlib import Path
 
 import numpy as np
 import matplotlib.pyplot as plt
 
-from atlas import NETWORK_ORDER, load_network_labels, network_block_centers, network_sort_order
-from confounds import VARIANT_TAGS
-from layout import Run, parcels
+from mmm.utils.atlas import NETWORK_ORDER, load_network_labels, network_block_centers, network_sort_order
+from mmm.utils.confounds import VARIANT_TAGS
+from mmm.utils.layout import CACHE, FIGURES, Run, parcels
 
 MOVIE_TAG = "negspace"
 
@@ -42,8 +41,8 @@ CLIP_LOCATIONS = {
 SUBJECTS = list(CLIP_LOCATIONS)
 N_TR = int(np.floor(min(c["duration_tr"] for c in CLIP_LOCATIONS.values())))
 
-OUT_DIR = Path("scratch/isfc_matrices")
-OUT_DIR_NETWORK = Path("scratch/isfc_matrices_bynetwork")
+OUT_DIR = CACHE / "connectivity" / "isfc_matrices"
+OUT_DIR_NETWORK = FIGURES / "connectivity" / "isfc_bynetwork"
 
 
 def load_movie_segment(subject, variant_tag):

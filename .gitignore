@@ -12,7 +12,7 @@ wheels/
 # large data
 data/
 standard/
-scratch/
+outputs/
 
 # pipeline outputs (parcellated timecourses)
 derivatives/

@@ -8,27 +8,27 @@ Clip selection, cropping, per-subject window alignment, the lag convention
 audio_envelope_corr.py's; only the ROI and the stimulus feature differ.
 
 Usage:
-    python motion_energy_corr.py                    # every runnable clip
-    python motion_energy_corr.py "Fool" "Big Take"
-    python motion_energy_corr.py --exclude "Snack Attack"
+    uv run python -m mmm.analyses.lag_correlation.motion_energy_corr          # every runnable clip
+    uv run python -m mmm.analyses.lag_correlation.motion_energy_corr "Fool" "Big Take"
+    uv run python -m mmm.analyses.lag_correlation.motion_energy_corr --exclude "Snack Attack"
 
 REPEATED_MOVIES are excluded unless named explicitly; every showing of them is
-plotted by repeated_movies_motion_corr.py.
+plotted by motion_repeated_corr.py.
 """
 import argparse
 import sys
 
 import pandas as pd
-from pathlib import Path
 
-from atlas import ORDER_TXT
-from motion_energy import get_motion_energy
-from audio_envelope_corr import (ORDER_CSV, REPEATED_MOVIES, OVERVIEW_MAX_COLS, VARIANT_TAGS,
-                                 compute_movie, discover_movies, get_roi_rows, print_skip_report,
-                                 render_movie, save_overview, shared_ylim, split_evenly)
+from mmm.utils.atlas import ORDER_TXT
+from mmm.utils.layout import FIGURES, ORDER_CSV
+from mmm.analyses.lag_correlation.motion_energy import get_motion_energy
+from mmm.analyses.lag_correlation.audio_envelope_corr import (
+    REPEATED_MOVIES, OVERVIEW_MAX_COLS, VARIANT_TAGS, compute_movie, discover_movies,
+    get_roi_rows, print_skip_report, render_movie, save_overview, shared_ylim, split_evenly)
 
 ROI_TAG = 'VisCent'
-OUT_DIR = Path('scratch/motion_energy_corr')
+OUT_DIR = FIGURES / 'lag_correlation' / 'motion_energy_corr'
 INDIVIDUAL_DIR = OUT_DIR / 'individual'
 OVERVIEW_DIR = OUT_DIR / 'overview'
 

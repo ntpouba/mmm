@@ -6,7 +6,7 @@
 # and hemisphere, writing into a temp dir it deletes once the run is
 # parcellated. Can also be run by hand:
 #
-#   freesurfer_surface_smoothing_1.sh <lh|rh> <input.func.gii> <output.func.gii>
+#   smooth_surface.sh <lh|rh> <input.func.gii> <output.func.gii>
 #
 # Exits non-zero on any failure, leaving no partial output behind.
 

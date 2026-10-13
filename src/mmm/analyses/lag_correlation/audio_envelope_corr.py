@@ -11,14 +11,14 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
-from lag_corr import _CURVE_COLORS, lag_cor, plot_lag_result
-from audio_envelope import TR, get_audio_envelopes, stimulus_status
+from mmm.analyses.lag_correlation.lag_corr import _CURVE_COLORS, lag_cor, plot_lag_result
+from mmm.analyses.lag_correlation.audio_envelope import TR, get_audio_envelopes, stimulus_status
 
-from atlas import ORDER_TXT
-from layout import Run, iter_runs, mni_bold, parcels
+from mmm.utils.atlas import ORDER_TXT
+from mmm.utils.layout import FIGURES, ORDER_CSV, Run, iter_runs, mni_bold, parcels
 
 VARIANT_TAGS = ['basecsfwm']
-# Shown in every session; every showing is plotted by repeated_movies_corr.py,
+# Shown in every session; every showing is plotted by audio_repeated_corr.py,
 # so they are left out of this script's default set of clips.
 REPEATED_MOVIES = ['The Bench', 'From Dad To Son']
 RUNS = ['run-01', 'run-02']  # searched per subject; whichever run holds the clip is used
@@ -34,13 +34,12 @@ MAX_LAG = 20     # TRs (+-30s)
 PLAUSIBLE_LAG_RANGE = (-5, -2)   # TRs: audio leads BOLD by 3-7.5s
 R_THRESHOLD = 0.1
 
-ORDER_CSV = Path('movie_order.csv')
 # This script writes OUT_DIR/individual/<movie>/<subject>.png and
 # OUT_DIR/overview/{no-speech,speech-NN}.png (subjects x clips);
-# repeated_movies_corr.py writes OUT_DIR/repeated/.
+# audio_repeated_corr.py writes OUT_DIR/repeated/.
 # The variant is not in the path (only one is run, see VARIANT_TAGS); it is in
 # each figure's title.
-OUT_DIR = Path('scratch/audio_envelope_corr')
+OUT_DIR = FIGURES / 'lag_correlation' / 'audio_envelope_corr'
 INDIVIDUAL_DIR = OUT_DIR / 'individual'
 OVERVIEW_DIR = OUT_DIR / 'overview'
 OVERVIEW_MAX_COLS = 7  # speech clips are spread evenly over as few grids as this allows
@@ -168,10 +167,6 @@ def scan_start_in_clip(subject, session, row):
 
 
 def compute_one(subject, session, variant_tag, row, features, roi_rows):
-    """Lag-correlate one subject's ROI timecourse against every stimulus
-    feature in `features` ({kind: per-volume trace}). Returns the curves themselves plus each kind's peak; plotting is
-    deferred so that every figure can share one correlation axis. The data is
-    assumed to have passed subject_preflight."""
     combined = np.load(parcel_path(subject, session, row.run, variant_tag))
 
     window = crop_window(combined, row.movie_onset_TR, row.movie_duration_TR)

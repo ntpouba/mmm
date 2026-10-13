@@ -12,9 +12,9 @@ for how parcels map to networks.
 import numpy as np
 import matplotlib.pyplot as plt
 
-from atlas import NETWORK_ORDER, NPARCEL, load_network_labels, network_block_centers, network_sort_order
-from confounds import VARIANT_TAGS
-from layout import TASKS, fc_avg, fc_avg_grid_png, fc_avg_png, fc_matrix, iter_runs, parcels
+from mmm.utils.atlas import NETWORK_ORDER, NPARCEL, load_network_labels, network_block_centers, network_sort_order
+from mmm.utils.confounds import VARIANT_TAGS
+from mmm.utils.layout import TASKS, fc_avg, fc_avg_grid_png, fc_avg_png, fc_matrix, iter_runs, parcels
 
 
 def compute_fc(combined):

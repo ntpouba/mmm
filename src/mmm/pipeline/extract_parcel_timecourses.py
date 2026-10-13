@@ -6,8 +6,8 @@
 import numpy as np
 import nibabel.freesurfer as fs
 
-from atlas import STANDARD_DIR
-from layout import HEMIS
+from mmm.utils.atlas import STANDARD_DIR
+from mmm.utils.layout import HEMIS
 
 # ------------------------------------------------------------------
 # Parcel / atlas info

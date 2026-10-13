@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from layout import ROOT
+from mmm.utils.layout import ROOT
 
 STANDARD_DIR = ROOT / "standard"
 ORDER_TXT = STANDARD_DIR / "Schaefer2018_400Parcels_17Networks_order.txt"

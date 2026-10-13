@@ -2,9 +2,10 @@ from functools import lru_cache
 import numpy as np
 import av
 
-from audio_envelope import BASEPATH, TR, _resolve_stim_path, _slugify, _window_means
+from mmm.utils.layout import ROOT
+from mmm.analyses.lag_correlation.audio_envelope import TR, _resolve_stim_path, _slugify, _window_means
 
-CACHEPATH = BASEPATH / 'data' / 'stimuli' / 'motion'
+CACHEPATH = ROOT / 'data' / 'stimuli' / 'motion'
 
 # Frames are converted to grayscale at this width (aspect kept) before differencing.
 FRAME_WIDTH = 160

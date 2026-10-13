@@ -5,10 +5,14 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[3]
 DATASET = Path("/home/datasets/mmm")  # raw fmriprep output: read only, never written to
 DERIV = ROOT / "derivatives"          # parcellated timecourses, the only pipeline files kept
-SCRATCH = ROOT / "scratch"            # analysis outputs + postprocess temp files
+ORDER_CSV = ROOT / "movie_order.csv"
+OUTPUTS = ROOT / "outputs"
+FIGURES = OUTPUTS / "figures"        # human-readable plots, nested like src/mmm/analyses
+CACHE = OUTPUTS / "cache"            # intermediate arrays, safe to delete and regenerate
+TMP = OUTPUTS / "tmp"                # postprocess temp files
 
 TASKS: tuple[str, ...] = ("NATencoding", "NATretrieval")
 
@@ -87,7 +91,7 @@ def mni_brain_mask(r: Run) -> Path:
 
 
 # ------------------------------------------------------------------
-# Outputs (DERIV / SCRATCH only)
+# Outputs (DERIV / OUTPUTS only)
 # ------------------------------------------------------------------
 
 def parcels(r: Run, variant: str) -> Path:
@@ -96,37 +100,37 @@ def parcels(r: Run, variant: str) -> Path:
 
 
 def fc_matrix(r: Run, variant: str) -> Path:
-    return SCRATCH / "fc_matrices" / f"{r.prefix}_{variant}_fc400.npy"
+    return CACHE / "connectivity" / "fc_matrices" / f"{r.prefix}_{variant}_fc400.npy"
 
 
 def fc_avg(sub: str, task: str, variant: str) -> Path:
     """Mean of one subject's per-run FC matrices for one task and variant."""
-    return SCRATCH / "fc_avg" / f"{sub}_task-{task}_{variant}_fc400.npy"
+    return CACHE / "connectivity" / "fc_avg" / f"{sub}_task-{task}_{variant}_fc400.npy"
 
 
 def fc_avg_png(sub: str, task: str, variant: str) -> Path:
-    return SCRATCH / "fc_avg_plots" / task / sub / f"{variant}.png"
+    return FIGURES / "connectivity" / "fc_avg" / task / sub / f"{variant}.png"
 
 
 def hippo_profile(r: Run, variant: str) -> Path:
     """One run's hippocampal FC profile: (400,) correlation with each cortical parcel."""
-    return SCRATCH / "hippocampal_profiles" / f"{r.prefix}_{variant}_hippo400.npy"
+    return CACHE / "connectivity" / "hippocampal_profiles" / f"{r.prefix}_{variant}_hippo400.npy"
 
 
 def hippo_avg(sub: str, task: str, kind: str) -> Path:
     """kind "profiles": (n_variants, 400) mean profiles; kind "similarity": (n_variants, n_variants)."""
-    return SCRATCH / "hippocampal_avg" / f"{sub}_task-{task}_hippo_{kind}.npy"
+    return CACHE / "connectivity" / "hippocampal_avg" / f"{sub}_task-{task}_hippo_{kind}.npy"
 
 
 def hippo_png(sub: str, task: str, kind: str) -> Path:
     """kind "similarity" or "profile"."""
-    return SCRATCH / "hippocampal_plots" / task / sub / f"{kind}.png"
+    return FIGURES / "connectivity" / "hippocampal" / task / sub / f"{kind}.png"
 
 
 def hippo_overview_png(task: str) -> Path:
-    return SCRATCH / "hippocampal_plots" / task / f"{task}_overview.png"
+    return FIGURES / "connectivity" / "hippocampal" / task / f"{task}_overview.png"
 
 
 def fc_avg_grid_png(task: str) -> Path:
     """All subjects x variants for one task in one figure, next to the per-subject folders."""
-    return SCRATCH / "fc_avg_plots" / task / f"{task}_grid.png"
+    return FIGURES / "connectivity" / "fc_avg" / task / f"{task}_grid.png"

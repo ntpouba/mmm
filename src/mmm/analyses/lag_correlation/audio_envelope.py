@@ -1,13 +1,13 @@
 from functools import lru_cache
-from pathlib import Path
 import numpy as np
 import scipy.io.wavfile as wav
 import scipy.signal
 import av
 
-BASEPATH = Path(__file__).parent
-STIMPATH = BASEPATH / 'data' / 'stimuli' / 'movies'
-CACHEPATH = BASEPATH / 'data' / 'stimuli' / 'envelopes'
+from mmm.utils.layout import ROOT
+
+STIMPATH = ROOT / 'data' / 'stimuli' / 'movies'
+CACHEPATH = ROOT / 'data' / 'stimuli' / 'envelopes'
 TR = 1.5
 
 _AUDIO_EXTS = {'.wav', '.mov', '.mp4', '.m4a', '.mp3'}

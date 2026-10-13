@@ -10,9 +10,9 @@ from nilearn.image import resample_to_img
 from nilearn.signal import clean
 from tqdm import tqdm
 
-from atlas import NETWORK_ORDER, NPARCEL, STANDARD_DIR, load_network_labels, network_block_centers, network_sort_order
-from confounds import CONFOUND_VARIANTS, VARIANT_TAGS, build_covariates
-from layout import (
+from mmm.utils.atlas import NETWORK_ORDER, NPARCEL, STANDARD_DIR, load_network_labels, network_block_centers, network_sort_order
+from mmm.utils.confounds import CONFOUND_VARIANTS, VARIANT_TAGS, build_covariates
+from mmm.utils.layout import (
     TASKS, confounds_tsv, hippo_avg, hippo_overview_png, hippo_png, hippo_profile,
     iter_runs, mni_bold, mni_brain_mask,
 )

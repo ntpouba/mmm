@@ -1,24 +1,25 @@
 """
-Visual counterpart of repeated_movies_corr.py: visual-cortex motion-energy lag correlation
+Visual counterpart of audio_repeated_corr.py: visual-cortex motion-energy lag correlation
 for every showing of The Bench and From Dad To Son.
 
 One figure per clip, one panel per subject, one curve per showing coloured
 light (ses-19) to dark (ses-28). Everything but the ROI and the stimulus
-feature is as in repeated_movies_corr.py (negative lag = video leads BOLD).
+feature is as in audio_repeated_corr.py (negative lag = video leads BOLD).
 
 Usage:
-    python repeated_movies_motion_corr.py
+    uv run python -m mmm.analyses.lag_correlation.motion_repeated_corr
 """
 import sys
 
 import numpy as np
 import pandas as pd
 
-from atlas import ORDER_TXT
-from motion_energy import get_motion_energy
-from audio_envelope_corr import REPEATED_MOVIES, ORDER_CSV, VARIANT_TAGS, get_roi_rows
-from motion_energy_corr import OUT_DIR, ROI_TAG
-from repeated_movies_corr import compute_movie, plot_movie, print_summary
+from mmm.utils.atlas import ORDER_TXT
+from mmm.utils.layout import ORDER_CSV
+from mmm.analyses.lag_correlation.motion_energy import get_motion_energy
+from mmm.analyses.lag_correlation.audio_envelope_corr import REPEATED_MOVIES, VARIANT_TAGS, get_roi_rows
+from mmm.analyses.lag_correlation.motion_energy_corr import OUT_DIR, ROI_TAG
+from mmm.analyses.lag_correlation.audio_repeated_corr import compute_movie, plot_movie, print_summary
 
 KIND = 'motion'
 
